@@ -350,7 +350,7 @@ class GateGuardService : Service() {
         guardWatcherJob?.cancel()
         guardWatcherJob = serviceScope.launch {
             while (isActive && isTipEnabled && !isSessionUnlocked) {
-                delay(450)
+                delay(150)
                 if (isTipEnabled && !isSessionUnlocked && !GateActivity.isGateForeground) {
                     val top = getForegroundPackage()
                     if (top != null && top != packageName && !isWhitelistPackage(top)) {

@@ -9,6 +9,9 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -81,6 +84,9 @@ class GateActivity : ComponentActivity() {
         }
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars()
 
         // 拦截侧滑返回手势，防止通过返回键直接逃离门禁
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -246,6 +252,7 @@ class GateActivity : ComponentActivity() {
         isLaunchingWhitelistApp = false
         isIntentSubmitted = false
         isGateForeground = true
+        hideSystemBars()
         try {
             val am = getSystemService(android.app.ActivityManager::class.java)
             am?.appTasks?.forEach { task ->
@@ -268,10 +275,48 @@ class GateActivity : ComponentActivity() {
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemBars()
+        } else {
+            // 用户手速极快试图拉出系统多任务面板或状态栏
+            if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
+                @Suppress("DEPRECATION")
+                try {
+                    sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+                } catch (_: Exception) {}
+                reassertGateForeground()
+            }
+        }
+    }
+
+    private fun hideSystemBars() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.decorView.post {
+                val h = window.decorView.height
+                val w = window.decorView.width
+                if (h > 0 && w > 0) {
+                    // 排除底部 20% 区域的系统导航手势响应（防止上滑回桌面手势生效）
+                    val bottomHeight = (h * 0.2f).toInt()
+                    val rect = android.graphics.Rect(0, h - bottomHeight, w, h)
+                    window.decorView.systemGestureExclusionRects = listOf(rect)
+                }
+            }
+        }
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         // 用户尝试底部上滑（回到桌面或切多任务）
         if (!isIntentSubmitted && !isLaunchingWhitelistApp) {
+            @Suppress("DEPRECATION")
+            try {
+                sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+            } catch (_: Exception) {}
             reassertGateForeground()
         }
     }
