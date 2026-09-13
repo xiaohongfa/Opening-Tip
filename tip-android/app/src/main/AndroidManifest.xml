@@ -44,6 +44,9 @@
             android:name=".ui.GateActivity"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
 
@@ -52,6 +55,8 @@
             android:name=".ui.ManagementActivity"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:taskAffinity=""
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:label="开屏Tip"

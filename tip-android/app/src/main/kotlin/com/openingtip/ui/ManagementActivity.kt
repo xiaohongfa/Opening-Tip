@@ -42,6 +42,12 @@ class ManagementActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        try {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am?.appTasks?.forEach { task ->
+                task.setExcludeFromRecents(true)
+            }
+        } catch (_: Exception) {}
         refreshPermissions()
 
         // 针对国产系统返回时 AppOps 状态异步同步延迟：多段延时重检 (200ms, 500ms, 1000ms)
@@ -69,7 +75,9 @@ class ManagementActivity : ComponentActivity() {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@ManagementActivity, "限制阶段中无法进入设置", Toast.LENGTH_SHORT).show()
                     val intent = Intent(this@ManagementActivity, GateActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                     }
                     startActivity(intent)
                     finish()
@@ -403,7 +411,9 @@ class ManagementActivity : ComponentActivity() {
                 Toast.makeText(this@ManagementActivity, "开屏自律门禁已就绪！锁屏解锁后将自动呈现", Toast.LENGTH_LONG).show()
                 // 首次开启直接拉起一次 Gate 体验门禁
                 val gateIntent = Intent(this@ManagementActivity, GateActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                 }
                 startActivity(gateIntent)
                 finish()
@@ -605,5 +615,15 @@ class ManagementActivity : ComponentActivity() {
                 finishAffinity()
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am?.appTasks?.forEach { task ->
+                task.setExcludeFromRecents(true)
+            }
+        } catch (_: Exception) {}
     }
 }

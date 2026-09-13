@@ -58,6 +58,12 @@ class GateActivity : ComponentActivity() {
         isIntentSubmitted = false
         isLaunchingWhitelistApp = false
         try {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am?.appTasks?.forEach { task ->
+                task.setExcludeFromRecents(true)
+            }
+        } catch (_: Exception) {}
+        try {
             val nm = getSystemService(android.app.NotificationManager::class.java)
             nm?.cancel(1002)
         } catch (_: Exception) {}
@@ -241,6 +247,12 @@ class GateActivity : ComponentActivity() {
         isIntentSubmitted = false
         isGateForeground = true
         try {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am?.appTasks?.forEach { task ->
+                task.setExcludeFromRecents(true)
+            }
+        } catch (_: Exception) {}
+        try {
             val nm = getSystemService(android.app.NotificationManager::class.java)
             nm?.cancel(1002)
         } catch (_: Exception) {}
@@ -256,14 +268,39 @@ class GateActivity : ComponentActivity() {
         }
     }
 
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // 用户尝试底部上滑（回到桌面或切多任务）
+        if (!isIntentSubmitted && !isLaunchingWhitelistApp) {
+            reassertGateForeground()
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         isGateForeground = false
+        if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
+            reassertGateForeground()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isGateForeground = false
+        if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
+            reassertGateForeground()
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         isGateForeground = false
+        try {
+            val am = getSystemService(android.app.ActivityManager::class.java)
+            am?.appTasks?.forEach { task ->
+                task.setExcludeFromRecents(true)
+            }
+        } catch (_: Exception) {}
     }
 
     private fun handleGateSubmission(input: String, activeSessionId: String?) {
@@ -323,14 +360,17 @@ class GateActivity : ComponentActivity() {
 
     private fun launchAppPackage(pkg: String) {
         try {
+            isLaunchingWhitelistApp = true
             val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
             if (launchIntent != null) {
                 startActivity(launchIntent)
             } else {
                 Toast.makeText(this, "无法启动应用: $pkg", Toast.LENGTH_SHORT).show()
+                isLaunchingWhitelistApp = false
             }
         } catch (e: Exception) {
             Toast.makeText(this, "启动异常: ${e.message}", Toast.LENGTH_SHORT).show()
+            isLaunchingWhitelistApp = false
         }
     }
 
@@ -419,6 +459,20 @@ class GateActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             database.todoDao().clearCompletedShortTermTodos()
         }
+    }
+
+    private fun reassertGateForeground() {
+        try {
+            val intent = Intent(this, GateActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+            }
+            startActivity(intent)
+            Toast.makeText(this, "自律门禁生效中：请先完成打卡或输入本次意图", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
 
     companion object {
