@@ -14,7 +14,7 @@ import android.view.inputmethod.InputMethodManager
  */
 object SystemPackageHelper {
 
-    // 系统基础框架、UI、电话来电、权限弹窗、系统文件选择器等基础服务包名
+    // 系统基础框架、UI、电话来电、权限弹窗、系统文件选择器等基础服务包名及各厂商安全键盘
     private val SYSTEM_AUXILIARY_PACKAGES = setOf(
         "android",
         "com.android.systemui",
@@ -36,7 +36,26 @@ object SystemPackageHelper {
         "com.android.phone",
         "com.android.incallui",
         "com.android.server.telecom",
-        "com.google.android.dialer"
+        "com.google.android.dialer",
+        // 小米 / Redmi (HyperOS / MIUI) 安全键盘与安全核心
+        "com.miui.securityinputmethod",
+        "com.miui.securitycore",
+        "com.miui.voiceassist",
+        // 华为 / 荣耀 (HarmonyOS / EMUI / MagicOS) 安全键盘
+        "com.huawei.secime",
+        "com.huawei.securityinputmethod",
+        "com.hihonor.secime",
+        // OPPO / 一加 / realme (ColorOS) 安全键盘与安全支付
+        "com.coloros.securitykeyboard",
+        "com.coloros.safecenter",
+        "com.oppo.securepay",
+        // vivo / iQOO (OriginOS) 安全输入法
+        "com.vivo.secime.service",
+        "com.bbk.securitykeyboard",
+        // 魅族 (Flyme) 与 三星 (OneUI) 安全输入法
+        "com.meizu.secinputmethod",
+        "com.samsung.android.honeyboard",
+        "com.sec.android.inputmethod"
     )
 
     // 常见输入法软键盘包名前缀
@@ -46,10 +65,16 @@ object SystemPackageHelper {
         "com.google.android.inputmethod",
         "com.iflytek",
         "com.tencent.qqpinyin",
+        "com.tencent.wetype", // 微信键盘
         "com.syntellia.fleksy",
         "com.touchtype.swiftkey",
         "com.emoji.keyboard",
-        "com.kika.keyboard"
+        "com.kika.keyboard",
+        "com.miui.securityinputmethod",
+        "com.coloros.securitykeyboard",
+        "com.vivo.secime",
+        "com.huawei.secime",
+        "com.hihonor.secime"
     )
 
     @Volatile
@@ -73,7 +98,10 @@ object SystemPackageHelper {
      * 判断是否为输入法软键盘（打字输入时不应触发防逃逸拉回）
      */
     fun isInputMethod(context: Context, pkg: String): Boolean {
-        // 快速前缀匹配
+        // 1. 快速白名单/前缀匹配 (0ms)
+        if (SYSTEM_AUXILIARY_PACKAGES.contains(pkg)) {
+            return true
+        }
         if (KNOWN_IME_PREFIXES.any { pkg.startsWith(it) }) {
             return true
         }
@@ -86,9 +114,20 @@ object SystemPackageHelper {
 
         return try {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            val imes = (imm?.enabledInputMethodList ?: imm?.inputMethodList ?: emptyList())
-                .map { it.packageName }
-                .toSet()
+            val enabledImes = imm?.enabledInputMethodList.orEmpty().map { it.packageName }
+            val allImes = imm?.inputMethodList.orEmpty().map { it.packageName }
+
+            // 通过系统 PMS 查询所有注册了 InputMethod 服务的组件，彻底覆盖隐藏或特权安全输入法
+            val serviceImes = try {
+                context.packageManager.queryIntentServices(
+                    Intent("android.view.InputMethod"),
+                    PackageManager.MATCH_ALL
+                ).mapNotNull { it.serviceInfo?.packageName }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val imes = (enabledImes + allImes + serviceImes).toSet()
             cachedImePackages = imes
             lastImeCacheTime = now
             imes.contains(pkg)

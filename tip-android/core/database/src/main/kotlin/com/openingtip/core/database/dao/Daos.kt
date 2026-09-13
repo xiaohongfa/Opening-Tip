@@ -123,11 +123,29 @@ interface SessionDao {
     suspend fun createSessionIfAbsent(
         session: SessionEntity,
         initialSegment: SessionSegmentEntity
-    ) {
+    ): String {
         val existing = getOpenSession()
-        if (existing == null) {
+        return if (existing == null) {
             insertSession(session)
             insertSegment(initialSegment)
+            session.id
+        } else {
+            existing.id
+        }
+    }
+
+    @Transaction
+    suspend fun getOrCreateCanonicalOpenSession(
+        session: SessionEntity,
+        initialSegment: SessionSegmentEntity
+    ): String {
+        val existing = getOpenSession()
+        return if (existing != null) {
+            existing.id
+        } else {
+            insertSession(session)
+            insertSegment(initialSegment)
+            session.id
         }
     }
 

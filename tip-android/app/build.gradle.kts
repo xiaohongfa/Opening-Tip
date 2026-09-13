@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,12 +22,19 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val keystorePropertiesFile = file("keystore.properties")
+    val keystoreProperties = Properties()
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    }
+
     signingConfigs {
         create("release") {
-            storeFile = file("openingtip.jks")
-            storePassword = "hyperintell2026"
-            keyAlias = "openingtip"
-            keyPassword = "hyperintell2026"
+            val keyStorePath = keystoreProperties.getProperty("storeFile") ?: "openingtip.jks"
+            storeFile = file(keyStorePath)
+            storePassword = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = keystoreProperties.getProperty("keyAlias") ?: "openingtip"
+            keyPassword = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD") ?: ""
         }
     }
 
@@ -47,11 +57,7 @@ android {
     productFlavors {
         create("consumer") {
             dimension = "mode"
-            // 普通安装版
-        }
-        create("managed") {
-            dimension = "mode"
-            // 受管设备专用版
+            // 普通自律版
         }
     }
 
@@ -82,16 +88,11 @@ android {
                 "../feature/launcher/src/main/kotlin",
                 "../feature/settings/src/main/kotlin",
                 "../data/usage/src/main/kotlin",
-                "../enforcement/consumer/src/main/kotlin",
-                "../enforcement/managed/src/main/kotlin"
+                "../enforcement/consumer/src/main/kotlin"
             )
         }
         getByName("consumer") {
             manifest.srcFile("src/consumer/AndroidManifest.xml")
-        }
-        getByName("managed") {
-            manifest.srcFile("src/managed/AndroidManifest.xml")
-            res.srcDirs("src/managed/res")
         }
     }
 }

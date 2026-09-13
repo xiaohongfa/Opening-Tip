@@ -19,6 +19,7 @@ class BootReceiver : BroadcastReceiver() {
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             Log.i("BootReceiver", "Received action: $action, 检查是否需要启动自律守护服务")
             val app = context.applicationContext as? TipApplication ?: return
+            val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val control = app.database.tipControlDao().getControl()
@@ -28,6 +29,8 @@ class BootReceiver : BroadcastReceiver() {
                     }
                 } catch (e: Exception) {
                     Log.e("BootReceiver", "Error checking tip status on boot", e)
+                } finally {
+                    pendingResult.finish()
                 }
             }
         }

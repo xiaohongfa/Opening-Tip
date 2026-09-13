@@ -68,16 +68,17 @@ class GateGuardService : Service() {
     }
 
     @Volatile
-    private var lastWhitelistedLaunchTime: Long = 0L
+    private var launchGracePackage: String? = null
     @Volatile
-    private var currentWhitelistedPkg: String? = null
+    private var launchGraceExpiresAt: Long = 0L
 
     /**
      * 当用户在门禁中点击白名单应用时调用，授予 1500ms 的启动过渡保护期
      */
     fun notifyWhitelistedAppLaunch(pkg: String) {
-        lastWhitelistedLaunchTime = SystemClock.elapsedRealtime()
-        currentWhitelistedPkg = pkg
+        val now = SystemClock.elapsedRealtime()
+        launchGracePackage = pkg
+        launchGraceExpiresAt = now + 1500L
         Log.i(TAG, "Whitelisted app launch notified: $pkg (granted 1500ms transition grace period)")
     }
 
@@ -85,8 +86,8 @@ class GateGuardService : Service() {
      * 判断当前是否处于白名单应用启动保护期内（避免冷启动过渡时误判拉回）
      */
     fun isWhitelistedAppLaunching(): Boolean {
-        val elapsed = SystemClock.elapsedRealtime() - lastWhitelistedLaunchTime
-        return elapsed in 0..1500L
+        val now = SystemClock.elapsedRealtime()
+        return now < launchGraceExpiresAt
     }
 
     /**
@@ -95,7 +96,9 @@ class GateGuardService : Service() {
     fun isPackageAllowedWhileLocked(pkg: String): Boolean {
         if (pkg == packageName) return true
         if (isWhitelisted(pkg)) return true
-        if (pkg == currentWhitelistedPkg) return true
+        val now = SystemClock.elapsedRealtime()
+        // 仅在 1500ms 保护期内临时放行目标包名，保护期结束后必须以正式白名单配置为准，杜绝永久旁路漏洞
+        if (pkg == launchGracePackage && now < launchGraceExpiresAt) return true
         if (SystemPackageHelper.isSystemAuxiliaryPackage(pkg)) return true
         if (SystemPackageHelper.isInputMethod(this, pkg)) return true
         return false
@@ -106,6 +109,10 @@ class GateGuardService : Service() {
     private val floatingTimer by lazy { FloatingTimerManager(this) }
     private var focusTimerJob: Job? = null
 
+    @Volatile
+    private var timerDeadlineElapsedMs: Long = 0L
+    @Volatile
+    private var timerDeadlineWallMs: Long = 0L
     @Volatile
     private var currentTimerRemainingSeconds = 0
     @Volatile
@@ -279,6 +286,8 @@ class GateGuardService : Service() {
     private fun onDeviceScreenOff() {
         Log.i(TAG, "onDeviceScreenOff: 屏幕熄灭/进入锁屏，0ms 瞬间锁定会话并收起悬浮倒计时")
         isSessionUnlocked = false // 内存级瞬间闭锁！
+        launchGracePackage = null
+        launchGraceExpiresAt = 0L
         guardWatcherJob?.cancel()
         stopFocusTimer() // 停止倒计时与悬浮窗！
 
@@ -395,6 +404,12 @@ class GateGuardService : Service() {
     }
 
     private fun launchGateActivityInternal() {
+        // 核心修复 OT-P0-002：在任何拉起路径执行前，确保守护侦测与数据库 Canonical Session 处于 RESTRICTED 阶段！
+        startGuardWatcher()
+        serviceScope.launch {
+            ensureActiveSession()
+        }
+
         // 1. 如果无障碍守护服务已经就绪，由享有安卓 BAL 豁免特权的无障碍服务直接拉起（100%穿透后台限制）
         val a11y = TipAccessibilityService.instance
         if (a11y != null) {
@@ -437,8 +452,15 @@ class GateGuardService : Service() {
             Log.e(TAG, "PendingIntent also failed", e2)
         }
 
-        // 4. 发送 FullScreenIntent 高优先级顶层穿透通知
+        // 4. 发送 FullScreenIntent 高优先级顶层穿透通知（适配 Android 14+ canUseFullScreenIntent 检测）
         try {
+            val nm = getSystemService(NotificationManager::class.java)
+            val canFsi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                nm?.canUseFullScreenIntent() ?: true
+            } else {
+                true
+            }
+
             val fullScreenPendingIntent = PendingIntent.getActivity(
                 this,
                 POPUP_REQUEST_CODE,
@@ -451,22 +473,20 @@ class GateGuardService : Service() {
                 .setContentText("请声明本次打开手机的意图")
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .apply {
+                    if (canFsi) {
+                        setFullScreenIntent(fullScreenPendingIntent, true)
+                    } else {
+                        setContentIntent(fullScreenPendingIntent)
+                    }
+                }
                 .setAutoCancel(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build()
 
-            val nm = getSystemService(NotificationManager::class.java)
             nm?.notify(POPUP_NOTIFICATION_ID, popupNotification)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send fullScreenIntent notification", e)
-        }
-
-        startGuardWatcher()
-
-        // 异步确保当前 Session 实体已在数据库建立，且状态处于 RESTRICTED 阶段
-        serviceScope.launch {
-            ensureActiveSession()
         }
     }
 
@@ -526,7 +546,10 @@ class GateGuardService : Service() {
     private suspend fun ensureActiveSession() {
         try {
             val control = database.tipControlDao().getControl() ?: return
-            if (control.activeSessionId == null) {
+            val openSession = database.sessionDao().getOpenSession()
+            val canonicalId = if (openSession != null) {
+                openSession.id
+            } else {
                 val now = System.currentTimeMillis()
                 val newId = UUID.randomUUID().toString()
                 val newSession = SessionEntity(
@@ -541,11 +564,11 @@ class GateGuardService : Service() {
                     kind = SegmentKind.RESTRICTED.name,
                     startWallMs = now
                 )
-                database.sessionDao().createSessionIfAbsent(newSession, initialSegment)
+                database.sessionDao().getOrCreateCanonicalOpenSession(newSession, initialSegment)
+            }
+            if (control.activeSessionId != canonicalId || control.state != SessionState.RESTRICTED.name) {
                 database.tipControlDao().updateEnabled(true, SessionState.RESTRICTED.name)
-                database.tipControlDao().updateActiveSessionId(newId)
-            } else if (control.state != SessionState.RESTRICTED.name) {
-                database.tipControlDao().updateEnabled(true, SessionState.RESTRICTED.name)
+                database.tipControlDao().updateActiveSessionId(canonicalId)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error ensuring active session", e)
@@ -568,7 +591,21 @@ class GateGuardService : Service() {
             )
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             val restartTime = SystemClock.elapsedRealtime() + 1000
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager?.canScheduleExactAlarms() == true) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        restartTime,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager?.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        restartTime,
+                        pendingIntent
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager?.setExactAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     restartTime,
@@ -594,9 +631,13 @@ class GateGuardService : Service() {
         if (targetDurationMinutes <= 0) return
         focusTimerJob?.cancel()
 
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val totalSec = targetDurationMinutes * 60
+        timerDeadlineElapsedMs = nowElapsed + (totalSec * 1000L)
+        timerDeadlineWallMs = System.currentTimeMillis() + (totalSec * 1000L)
         currentTimerIntentText = intentText
-        currentTimerRemainingSeconds = targetDurationMinutes * 60
-        currentTimerTotalSeconds = currentTimerRemainingSeconds
+        currentTimerRemainingSeconds = totalSec
+        currentTimerTotalSeconds = totalSec
         hasTriggeredTimeoutAlert = false
 
         floatingTimer.show(
@@ -613,29 +654,37 @@ class GateGuardService : Service() {
 
         focusTimerJob = serviceScope.launch {
             while (isActive && isSessionUnlocked) {
-                val isTimeout = currentTimerRemainingSeconds <= 0
-                floatingTimer.updateTime(currentTimerRemainingSeconds, isTimeout)
-                updateTimerNotification(currentTimerIntentText, currentTimerRemainingSeconds, currentTimerTotalSeconds, isTimeout)
+                val now = SystemClock.elapsedRealtime()
+                val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
+                currentTimerRemainingSeconds = remainingSec
+                val isTimeout = remainingSec <= 0
+                floatingTimer.updateTime(remainingSec, isTimeout)
+                updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, isTimeout)
 
-                if (currentTimerRemainingSeconds == 0 && !hasTriggeredTimeoutAlert) {
+                if (remainingSec <= 0 && !hasTriggeredTimeoutAlert) {
                     hasTriggeredTimeoutAlert = true
                     triggerTimeoutAlert(currentTimerIntentText, (currentTimerTotalSeconds / 60).coerceAtLeast(1))
                 }
 
                 delay(1000)
-                currentTimerRemainingSeconds--
             }
         }
     }
 
     fun extendFocusTimer(additionalMinutes: Int) {
-        currentTimerRemainingSeconds += (additionalMinutes * 60)
-        currentTimerTotalSeconds += (additionalMinutes * 60)
-        if (currentTimerRemainingSeconds > 0) {
+        val extraSec = additionalMinutes * 60
+        val extraMs = extraSec * 1000L
+        timerDeadlineElapsedMs += extraMs
+        timerDeadlineWallMs += extraMs
+        currentTimerTotalSeconds += extraSec
+        val now = SystemClock.elapsedRealtime()
+        val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
+        currentTimerRemainingSeconds = remainingSec
+        if (remainingSec > 0) {
             hasTriggeredTimeoutAlert = false
         }
-        floatingTimer.updateTime(currentTimerRemainingSeconds, currentTimerRemainingSeconds <= 0)
-        updateTimerNotification(currentTimerIntentText, currentTimerRemainingSeconds, currentTimerTotalSeconds, currentTimerRemainingSeconds <= 0)
+        floatingTimer.updateTime(remainingSec, remainingSec <= 0)
+        updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, remainingSec <= 0)
     }
 
     fun stopFocusTimer() {

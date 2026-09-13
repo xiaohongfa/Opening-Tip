@@ -14,9 +14,6 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission
-        android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
 
     <!-- 声明匹配 MAIN + LAUNCHER 的 queries -->
     <queries>
@@ -46,7 +43,7 @@
         <!-- 全屏自律门禁 GateActivity（解锁后唤起，不再作为系统桌面 HOME） -->
         <activity
             android:name=".ui.GateActivity"
-            android:exported="true"
+            android:exported="false"
             android:excludeFromRecents="true"
             android:autoRemoveFromRecents="true"
             android:taskAffinity="com.openingtip.gate"

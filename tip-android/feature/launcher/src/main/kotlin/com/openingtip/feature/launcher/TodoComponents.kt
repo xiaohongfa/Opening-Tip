@@ -39,6 +39,7 @@ fun TodoBoard(
     onClearCompletedShortTerm: () -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
+    var showClearCompletedDialog by remember { mutableStateOf(false) }
     var selectedTodoFilter by remember { mutableIntStateOf(0) } // 0: 全部, 1: 常驻, 2: 短期
 
     val filteredTodos = remember(todos, selectedTodoFilter) {
@@ -81,7 +82,7 @@ fun TodoBoard(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (todos.any { it.type == TodoType.SHORT_TERM && it.isCompleted }) {
-                        IconButton(onClick = onClearCompletedShortTerm, modifier = Modifier.size(32.dp)) {
+                        IconButton(onClick = { showClearCompletedDialog = true }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 Icons.Default.DeleteSweep,
                                 contentDescription = "清理已完成短期任务",
@@ -172,6 +173,40 @@ fun TodoBoard(
             }
         )
     }
+
+    if (showClearCompletedDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCompletedDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.DeleteSweep,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text("清理已完成待办", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("确定要清理所有已勾选完成的短期待办事项吗？")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearCompletedDialog = false
+                        onClearCompletedShortTerm()
+                    }
+                ) {
+                    Text("确认清理")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCompletedDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -183,6 +218,7 @@ fun TodoRowItem(
     onDelete: () -> Unit
 ) {
     var isHeatmapExpanded by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val todayKey = remember { dayFormat.format(Date()) }
@@ -264,7 +300,7 @@ fun TodoRowItem(
                             Text("打卡", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
 
-                        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = { showDeleteConfirmDialog = true }, modifier = Modifier.size(28.dp)) {
                             Icon(
                                 Icons.Default.Delete,
                                 contentDescription = "删除",
@@ -351,7 +387,7 @@ fun TodoRowItem(
                         }
                     }
 
-                    IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = { showDeleteConfirmDialog = true }, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "删除",
@@ -362,6 +398,63 @@ fun TodoRowItem(
                 }
             }
         }
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = if (todo.type == TodoType.PERMANENT) "删除常驻习惯" else "删除待办事项",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                if (todo.type == TodoType.PERMANENT) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("确定要删除常驻习惯「${todo.title}」吗？")
+                        if (todo.completedCount > 0) {
+                            Text(
+                                "该习惯已累计打卡 ${todo.completedCount} 次，删除后历史打卡记录与热力图将一并清除且不可恢复，请谨慎操作！",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else {
+                            Text(
+                                "删除后无法撤销。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Text("确定要删除短期待办「${todo.title}」吗？")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("确认删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 

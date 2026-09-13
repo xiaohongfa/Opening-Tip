@@ -28,7 +28,6 @@ fun OnboardingScreen(
     availableApps: List<AppItem>,
     isUsageAccessGranted: Boolean,
     isOverlayPermissionGranted: Boolean,
-    isManagedMode: Boolean,
     onStepChange: (Int) -> Unit,
     onAppToggle: (String) -> Unit,
     onConfirmEmptyWhitelist: () -> Unit,
@@ -69,11 +68,8 @@ fun OnboardingScreen(
                         onOpenAppDetails = onOpenAppDetails,
                         onRefreshPermissions = onRefreshPermissions
                     )
-                    4 -> StepModeCapability(
-                        isManagedMode = isManagedMode
-                    )
+                    4 -> StepModeCapability()
                     5 -> StepEnable(
-                        isManagedMode = isManagedMode,
                         onEnableTipMode = onEnableTipMode
                     )
                 }
@@ -345,9 +341,7 @@ private fun StepPermissions(
 }
 
 @Composable
-private fun StepModeCapability(
-    isManagedMode: Boolean
-) {
+private fun StepModeCapability() {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "第四步：自律模式与边界确认",
@@ -360,11 +354,10 @@ private fun StepModeCapability(
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("当前自律运行模式：", fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
-                if (isManagedMode) {
-                    Text("✓ 已验证的受管强限制模式 (Managed Device Owner)\n通过系统底层 Lock Task 严格封锁非白名单应用与后台任务。", color = MaterialTheme.colorScheme.primary)
-                } else {
-                    Text("ℹ 全屏无感自律门禁模式 (Full-Screen Gate Guard)\n✓ 原装系统桌面 100% 完整保留，壁纸与小部件完好无损；\n✓ 全面屏侧滑手势 100% 满血保留；\n✓ 指纹/面容/密码解锁完成后自动弹出开屏门禁；\n✓ 声明本次意图后立即退场，无感直达原装桌面。", color = MaterialTheme.colorScheme.secondary)
-                }
+                Text(
+                    "ℹ 全屏无感自律门禁模式 (Full-Screen Gate Guard)\n✓ 原装系统桌面 100% 完整保留，壁纸与小部件完好无损；\n✓ 全面屏侧滑手势 100% 满血保留；\n✓ 指纹/面容/密码解锁完成后自动弹出开屏门禁；\n✓ 声明本次意图后立即退场，无感直达原装桌面。",
+                    color = MaterialTheme.colorScheme.secondary
+                )
             }
         }
 
@@ -388,7 +381,6 @@ private fun StepModeCapability(
 
 @Composable
 private fun StepEnable(
-    isManagedMode: Boolean,
     onEnableTipMode: () -> Unit
 ) {
     Column(

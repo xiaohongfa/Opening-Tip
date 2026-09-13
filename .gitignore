@@ -34,3 +34,9 @@ Thumbs.db
 
 .kotlin/
 *.salive
+
+# Signing credentials
+*.jks
+*.keystore
+keystore.properties
+signing.properties

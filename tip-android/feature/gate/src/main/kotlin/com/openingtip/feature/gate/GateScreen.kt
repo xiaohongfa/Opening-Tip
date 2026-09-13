@@ -37,6 +37,8 @@ import com.openingtip.core.model.TodoType
 import com.openingtip.feature.launcher.TodoBoard
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Immutable
 data class GateAppUsageItem(
@@ -208,9 +210,16 @@ private fun HeaderSection(
     todayUsageDurationMs: Long,
     onOpenHistory: () -> Unit
 ) {
+    var currentTimeMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            currentTimeMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINESE) }
-    val now = remember { Date() }
+    val now = remember(currentTimeMs / 60000L) { Date(currentTimeMs) }
 
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(

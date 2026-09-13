@@ -267,7 +267,6 @@ class ManagementActivity : ComponentActivity() {
                     availableApps = installedApps,
                     isUsageAccessGranted = isUsageGranted,
                     isOverlayPermissionGranted = isOverlayGranted,
-                    isManagedMode = false,
                     onStepChange = { currentStep = it },
                     onAppToggle = { pkg ->
                         installedApps = installedApps.map {

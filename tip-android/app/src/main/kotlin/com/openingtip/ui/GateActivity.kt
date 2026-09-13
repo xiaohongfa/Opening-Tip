@@ -349,9 +349,7 @@ class GateActivity : ComponentActivity() {
             val isSecret = cred != null && secretManager.verify(input, cred)
 
             if (isSecret) {
-                // 暗号关闭
-                isIntentSubmitted = true
-                GateGuardService.markSessionUnlocked()
+                // 暗号关闭：先落盘更新状态为 DISARMED
                 val now = System.currentTimeMillis()
                 if (activeSessionId != null) {
                     database.sessionDao().closeSessionIfOpen(
@@ -363,15 +361,17 @@ class GateActivity : ComponentActivity() {
                 }
                 database.tipControlDao().updateEnabled(false, SessionState.DISARMED.name)
                 database.tipControlDao().updateActiveSessionId(null)
+
+                // 落盘成功后再执行内存解锁与关停
+                isIntentSubmitted = true
+                GateGuardService.markSessionUnlocked()
                 GateGuardService.stopService(this@GateActivity)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@GateActivity, "暗号正确，Tip 模式已关闭", Toast.LENGTH_SHORT).show()
                     finish() // 门禁关闭，显现原装系统桌面
                 }
             } else {
-                // 提交本次意图进入 FULL 模式
-                isIntentSubmitted = true
-                GateGuardService.markSessionUnlocked()
+                // 提交本次意图：先持久化写入数据库进入 FULL 模式
                 val now = System.currentTimeMillis()
                 if (activeSessionId != null) {
                     val fullSeg = SessionSegmentEntity(
@@ -391,6 +391,10 @@ class GateActivity : ComponentActivity() {
                     )
                 }
                 database.tipControlDao().updateEnabled(true, SessionState.FULL.name)
+
+                // 数据库事务全部成功后，才标记内存放行并启动倒计时
+                isIntentSubmitted = true
+                GateGuardService.markSessionUnlocked()
                 if (targetDurationMinutes != null && targetDurationMinutes > 0) {
                     GateGuardService.instance?.startFocusTimer(input.trim(), targetDurationMinutes)
                 }
