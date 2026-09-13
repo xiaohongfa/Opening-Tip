@@ -108,6 +108,17 @@ class GateActivity : ComponentActivity() {
                     val allSessions by database.sessionDao().observeAllSessions().collectAsState(initial = emptyList())
                     val allAppSummaries by database.usageDao().observeAllAppSummaries().collectAsState(initial = emptyList())
 
+                    val startOfDayMs = remember {
+                        Calendar.getInstance().apply {
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }.timeInMillis
+                    }
+                    val todayUnlockCount by database.sessionDao().observeTodaySessionCount(startOfDayMs).collectAsState(initial = 0)
+                    val todayUsageDurationMs by database.sessionDao().observeTodayTotalDuration(startOfDayMs).collectAsState(initial = 0L)
+
                     val historySessionItems = remember(allSessions, allAppSummaries) {
                         val summariesBySession = allAppSummaries.groupBy { it.sessionId }
                         allSessions.map { s ->
@@ -173,6 +184,7 @@ class GateActivity : ComponentActivity() {
                                         fullDurationMs = fullMs,
                                         topApps = topUsage,
                                         allApps = allUsage,
+                                        targetDurationMinutes = prevSessionEntity.targetDurationMinutes,
                                         isFirstUsage = false
                                     )
                                 } else {
@@ -198,6 +210,8 @@ class GateActivity : ComponentActivity() {
                         whitelistApps = whitelistItems,
                         todos = domainTodos,
                         historySessions = historySessionItems,
+                        todayUnlockCount = todayUnlockCount,
+                        todayUsageDurationMs = todayUsageDurationMs,
                         onToggleTodo = { id, isCompleted -> handleToggleTodo(id, isCompleted) },
                         onAddTodo = { title, type, targetTime -> handleAddTodo(title, type, targetTime) },
                         onIncrementPermanent = { id -> handleIncrementPermanent(id) },
@@ -219,8 +233,8 @@ class GateActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        onSubmitIntentOrSecret = { input ->
-                            handleGateSubmission(input, control?.activeSessionId)
+                        onSubmitIntentOrSecret = { input, targetMinutes ->
+                            handleGateSubmission(input, targetMinutes, control?.activeSessionId)
                         },
                         onLaunchWhitelistApp = { pkg ->
                             isLaunchingWhitelistApp = true
@@ -348,7 +362,7 @@ class GateActivity : ComponentActivity() {
         } catch (_: Exception) {}
     }
 
-    private fun handleGateSubmission(input: String, activeSessionId: String?) {
+    private fun handleGateSubmission(input: String, targetDurationMinutes: Int?, activeSessionId: String?) {
         lifecycleScope.launch(Dispatchers.IO) {
             val cred = secretStore.load()
             val isSecret = cred != null && secretManager.verify(input, cred)
@@ -390,13 +404,15 @@ class GateActivity : ComponentActivity() {
                         currentSegmentId = "",
                         newSegment = fullSeg,
                         intentText = input.trim(),
+                        targetDurationMinutes = targetDurationMinutes,
                         switchWallMs = now,
                         switchElapsedMs = null
                     )
                 }
                 database.tipControlDao().updateEnabled(true, SessionState.FULL.name)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@GateActivity, "已声明意图，请专注使用", Toast.LENGTH_SHORT).show()
+                    val durationHint = targetDurationMinutes?.let { " (预计 ${it}分钟)" } ?: ""
+                    Toast.makeText(this@GateActivity, "已声明意图$durationHint，请专注使用", Toast.LENGTH_SHORT).show()
                     finish() // 核心：门禁退出，无感显现原装系统桌面与手势！
                 }
             }

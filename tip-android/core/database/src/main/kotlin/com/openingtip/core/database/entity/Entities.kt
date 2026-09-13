@@ -78,6 +78,7 @@ data class SessionEntity(
     val quality: String = "PRECISE",
     val qualityReasons: String? = null,
     val durationMs: Long = 0L,
+    val targetDurationMinutes: Int? = null,
     val statsRevision: Long = 1L,
     val createdAt: Long = startWallMs
 )

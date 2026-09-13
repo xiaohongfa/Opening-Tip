@@ -23,7 +23,7 @@ import com.openingtip.core.database.entity.*
         AppliedPolicyEntity::class,
         TodoItemEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class TipDatabase : RoomDatabase() {
