@@ -14,6 +14,9 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -65,6 +68,17 @@ class GateGuardService : Service() {
 
     private var guardWatcherJob: Job? = null
     private var interactiveSentinelJob: Job? = null
+    private val floatingTimer by lazy { FloatingTimerManager(this) }
+    private var focusTimerJob: Job? = null
+
+    @Volatile
+    private var currentTimerRemainingSeconds = 0
+    @Volatile
+    private var currentTimerTotalSeconds = 0
+    @Volatile
+    private var currentTimerIntentText = ""
+    @Volatile
+    private var hasTriggeredTimeoutAlert = false
 
     override fun onCreate() {
         super.onCreate()
@@ -79,7 +93,18 @@ class GateGuardService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         instance = this
-        startAsForeground()
+        when (intent?.action) {
+            ACTION_LOCK_NOW -> {
+                stopFocusTimer()
+                forceLaunchGateActivity()
+            }
+            ACTION_EXTEND_ONE_MIN -> {
+                extendFocusTimer(1)
+            }
+            else -> {
+                startAsForeground()
+            }
+        }
         return START_STICKY
     }
 
@@ -94,6 +119,7 @@ class GateGuardService : Service() {
         if (instance === this) {
             instance = null
         }
+        stopFocusTimer()
         guardWatcherJob?.cancel()
         interactiveSentinelJob?.cancel()
         screenReceiver?.unregister(this)
@@ -166,6 +192,20 @@ class GateGuardService : Service() {
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
             manager?.createNotificationChannel(popupChannel)
+
+            // 超时强提醒高优先级通知渠道
+            val alertChannel = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "专注超时强提醒",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "自律专注时间用尽时强提醒"
+                setShowBadge(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 400, 200, 400)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+            }
+            manager?.createNotificationChannel(alertChannel)
         }
     }
 
@@ -202,9 +242,10 @@ class GateGuardService : Service() {
      * 屏幕熄灭时统一处理（由广播或哨兵触发）
      */
     private fun onDeviceScreenOff() {
-        Log.i(TAG, "onDeviceScreenOff: 屏幕熄灭/进入锁屏，0ms 瞬间锁定会话")
+        Log.i(TAG, "onDeviceScreenOff: 屏幕熄灭/进入锁屏，0ms 瞬间锁定会话并收起悬浮倒计时")
         isSessionUnlocked = false // 内存级瞬间闭锁！
         guardWatcherJob?.cancel()
+        stopFocusTimer() // 停止倒计时与悬浮窗！
 
         serviceScope.launch {
             try {
@@ -506,14 +547,184 @@ class GateGuardService : Service() {
         }
     }
 
+    /**
+     * 开启专注倒计时器（悬浮灵动胶囊 + 通知栏进度条 + 超时多重强提醒）
+     */
+    fun startFocusTimer(intentText: String, targetDurationMinutes: Int) {
+        if (targetDurationMinutes <= 0) return
+        focusTimerJob?.cancel()
+
+        currentTimerIntentText = intentText
+        currentTimerRemainingSeconds = targetDurationMinutes * 60
+        currentTimerTotalSeconds = currentTimerRemainingSeconds
+        hasTriggeredTimeoutAlert = false
+
+        floatingTimer.show(
+            intentText = intentText,
+            targetDurationMinutes = targetDurationMinutes,
+            onLock = {
+                stopFocusTimer()
+                forceLaunchGateActivity()
+            },
+            onExtend = {
+                extendFocusTimer(1)
+            }
+        )
+
+        focusTimerJob = serviceScope.launch {
+            while (isActive && isSessionUnlocked) {
+                val isTimeout = currentTimerRemainingSeconds <= 0
+                floatingTimer.updateTime(currentTimerRemainingSeconds, isTimeout)
+                updateTimerNotification(currentTimerIntentText, currentTimerRemainingSeconds, currentTimerTotalSeconds, isTimeout)
+
+                if (currentTimerRemainingSeconds == 0 && !hasTriggeredTimeoutAlert) {
+                    hasTriggeredTimeoutAlert = true
+                    triggerTimeoutAlert(currentTimerIntentText, (currentTimerTotalSeconds / 60).coerceAtLeast(1))
+                }
+
+                delay(1000)
+                currentTimerRemainingSeconds--
+            }
+        }
+    }
+
+    fun extendFocusTimer(additionalMinutes: Int) {
+        currentTimerRemainingSeconds += (additionalMinutes * 60)
+        currentTimerTotalSeconds += (additionalMinutes * 60)
+        if (currentTimerRemainingSeconds > 0) {
+            hasTriggeredTimeoutAlert = false
+        }
+        floatingTimer.updateTime(currentTimerRemainingSeconds, currentTimerRemainingSeconds <= 0)
+        updateTimerNotification(currentTimerIntentText, currentTimerRemainingSeconds, currentTimerTotalSeconds, currentTimerRemainingSeconds <= 0)
+    }
+
+    fun stopFocusTimer() {
+        focusTimerJob?.cancel()
+        focusTimerJob = null
+        floatingTimer.hide()
+        startAsForeground()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.cancel(ALERT_NOTIFICATION_ID)
+    }
+
+    private fun triggerTimeoutAlert(intentText: String, targetMinutes: Int) {
+        try {
+            // 1. 物理双脉冲节奏震动 (400ms - 200ms - 400ms)
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(longArrayOf(0, 400, 200, 400), -1)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Vibration alert failed", e)
+        }
+
+        try {
+            // 2. 高优先级横幅强提醒通知 (Heads-Up Alert)
+            val nm = getSystemService(NotificationManager::class.java)
+            val lockIntent = PendingIntent.getService(
+                this,
+                999,
+                Intent(this, GateGuardService::class.java).apply { action = ACTION_LOCK_NOW },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val extendIntent = PendingIntent.getService(
+                this,
+                998,
+                Intent(this, GateGuardService::class.java).apply { action = ACTION_EXTEND_ONE_MIN },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val alertNotification = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("⏰ 专注时间已到！")
+                .setContentText("您设定的 ${targetMinutes}分钟 已经用尽（意图: $intentText），请放下手机！")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .addAction(R.drawable.ic_launcher_foreground, "放下手机", lockIntent)
+                .addAction(R.drawable.ic_launcher_foreground, "+1分钟", extendIntent)
+                .build()
+
+            nm?.notify(ALERT_NOTIFICATION_ID, alertNotification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Timeout notification failed", e)
+        }
+    }
+
+    private fun updateTimerNotification(
+        intentText: String,
+        remainingSeconds: Int,
+        totalSeconds: Int,
+        isTimeout: Boolean
+    ) {
+        val formatted = formatSeconds(Math.abs(remainingSeconds))
+        val title = if (isTimeout) "⚠️ 专注已超时：$formatted" else "🎯 专注中：剩余 $formatted"
+        val text = "意图：$intentText (预计 ${(totalSeconds / 60).coerceAtLeast(1)}分钟)"
+
+        val lockIntent = PendingIntent.getService(
+            this,
+            999,
+            Intent(this, GateGuardService::class.java).apply { action = ACTION_LOCK_NOW },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val extendIntent = PendingIntent.getService(
+            this,
+            998,
+            Intent(this, GateGuardService::class.java).apply { action = ACTION_EXTEND_ONE_MIN },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val progress = if (totalSeconds > 0) {
+            ((totalSeconds - remainingSeconds).coerceAtLeast(0) * 100) / totalSeconds
+        } else 0
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(R.drawable.ic_launcher_foreground, "提前结束", lockIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "+1分钟", extendIntent)
+
+        if (!isTimeout && totalSeconds > 0) {
+            builder.setProgress(100, progress.coerceIn(0, 100), false)
+        }
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun formatSeconds(totalSecs: Int): String {
+        val s = totalSecs.coerceAtLeast(0)
+        val m = s / 60
+        val sec = s % 60
+        return String.format("%02d:%02d", m, sec)
+    }
+
     companion object {
         private const val TAG = "GateGuardService"
         private const val CHANNEL_ID = "openingtip_guard_channel"
         private const val POPUP_CHANNEL_ID = "openingtip_gate_popup_channel"
+        private const val ALERT_CHANNEL_ID = "openingtip_timeout_alert_channel"
         private const val NOTIFICATION_ID = 1001
         private const val POPUP_NOTIFICATION_ID = 1002
+        private const val ALERT_NOTIFICATION_ID = 1005
         private const val POPUP_REQUEST_CODE = 1003
         private const val RESTART_REQUEST_CODE = 1004
+
+        const val ACTION_LOCK_NOW = "com.openingtip.ACTION_LOCK_NOW"
+        const val ACTION_EXTEND_ONE_MIN = "com.openingtip.ACTION_EXTEND_ONE_MIN"
 
         @Volatile
         var instance: GateGuardService? = null

@@ -72,11 +72,16 @@ interface SessionDao {
     @Query("SELECT * FROM session WHERE status = 'OPEN' LIMIT 1")
     suspend fun getOpenSession(): SessionEntity?
 
-    @Query("SELECT * FROM session WHERE status = 'CLOSED' AND (:currentSessionId IS NULL OR id != :currentSessionId) ORDER BY endWallMs DESC LIMIT 1")
-    fun observePreviousClosedSession(currentSessionId: String?): Flow<SessionEntity?>
+    @Query("SELECT * FROM session WHERE status = 'CLOSED' AND (:currentSessionId IS NULL OR id != :currentSessionId) AND (intentText IS NOT NULL OR durationMs >= 15000) ORDER BY endWallMs DESC LIMIT 1")
+    suspend fun getPreviousMeaningfulClosedSession(currentSessionId: String?): SessionEntity?
 
     @Query("SELECT * FROM session WHERE status = 'CLOSED' AND (:currentSessionId IS NULL OR id != :currentSessionId) ORDER BY endWallMs DESC LIMIT 1")
     suspend fun getPreviousClosedSession(currentSessionId: String?): SessionEntity?
+
+    @Transaction
+    suspend fun getBestPreviousClosedSession(currentSessionId: String?): SessionEntity? {
+        return getPreviousMeaningfulClosedSession(currentSessionId) ?: getPreviousClosedSession(currentSessionId)
+    }
 
     @Query("SELECT * FROM session ORDER BY startWallMs DESC")
     fun observeAllSessions(): Flow<List<SessionEntity>>

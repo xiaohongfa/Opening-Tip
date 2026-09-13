@@ -2,7 +2,7 @@
 
 > 🧘 **开屏自律门禁工具，100% 纯血离线运行，意图审视与习惯打卡。**
 
-[![Version](https://img.shields.io/badge/version-1.0.5-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
+[![Version](https://img.shields.io/badge/version-1.0.6-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
 [![Developer](https://img.shields.io/badge/Developer-%E5%B0%8F%E7%BA%A2Fa-brightgreen.svg)](https://github.com/xiaohongfa)
 [![Organization](https://img.shields.io/badge/Organization-Hyperintell-orange.svg)](https://github.com/xiaohongfa)
 [![Offline](https://img.shields.io/badge/Network-0%20Permissions%20(Offline)-success.svg)](https://github.com/xiaohongfa/Opening-Tip)
@@ -20,7 +20,10 @@
 
 - 🚪 **开屏意图审视**：解锁屏幕即唤起全屏门禁，审视本次开屏的真实目标；
 - ⏱️ **预计使用时间预算 (Time Budget)**：支持快捷选定本次开屏计划使用时长（包含 **1分钟**、3分钟、5分钟、10分钟、15分钟、30分钟及不限）；
-- 🎯 **意图达成主动研判展示**：在下次开屏时，系统基于上次的预计时长与实际使用时间自动研判并醒目展示 `🟢 按时达成` 或 `🟠 超时使用`，用户无需手动答题，自律反馈一目了然；
+- 💊 **桌面悬浮灵动倒计时胶囊**：进入手机后常驻屏幕顶端小巧药丸胶囊（如 `🎯 00:58`），支持自由拖拽吸边，轻点展开查看意图或一键放下手机；
+- 🔔 **通知栏动态倒计时与进度条**：常驻通知栏展示剩余秒数与专注进度，支持【提前结束】与【+1分钟】快捷调整；
+- 🚨 **超时多重强提醒**：倒计时归零时触发 **双脉冲震动感知** + **高优先级横幅提醒**，胶囊即刻转为橙红警示与超时计数（`⚠️ 超时 00:15`）；
+- 🎯 **意图达成主动研判展示**：在下次开屏时，基于真实进入桌面的有效使用时长精准对比并醒目展示 `🟢 按时达成 (提前X分)` 或 `🟠 超时使用`；智能过滤误触短会话，历史记录永久稳固；
 - 🏷️ **自定义快捷意图标签**：内置高频动作标签，并支持用户自由增删改与持久化自定义（如回工作、背单词、查资料等）；
 - 📊 **今日自律看板**：开屏顶部直观呈现当前高清时钟、**今日第 N 次点亮屏幕次数**以及**今日累计使用时长**；
 - 🌿 **日常健康微习惯提示**：门禁底部呈现深呼吸、喝温水润喉、眺望远方、舒展肩颈等温馨身心关怀提示；
@@ -37,7 +40,7 @@
 
 * **开发者**：小红Fa
 * **所属组织**：Hyperintell
-* **版本号**：v1.0.5 (正式版)
+* **版本号**：v1.0.6 (正式版)
 * **开源协议**：Apache-2.0
 
 ---

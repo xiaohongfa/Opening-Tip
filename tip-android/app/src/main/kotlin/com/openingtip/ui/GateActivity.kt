@@ -161,7 +161,7 @@ class GateActivity : ComponentActivity() {
                         isReconciling = true
                         withContext(Dispatchers.IO) {
                             try {
-                                val prevSessionEntity = database.sessionDao().getPreviousClosedSession(control?.activeSessionId)
+                                val prevSessionEntity = database.sessionDao().getBestPreviousClosedSession(control?.activeSessionId)
                                 if (prevSessionEntity != null) {
                                     val segs = database.sessionDao().getSegmentsForSession(prevSessionEntity.id)
                                     val summaries = database.usageDao().getAppSummariesForSession(prevSessionEntity.id)
@@ -391,6 +391,9 @@ class GateActivity : ComponentActivity() {
                     )
                 }
                 database.tipControlDao().updateEnabled(true, SessionState.FULL.name)
+                if (targetDurationMinutes != null && targetDurationMinutes > 0) {
+                    GateGuardService.instance?.startFocusTimer(input.trim(), targetDurationMinutes)
+                }
                 withContext(Dispatchers.Main) {
                     val durationHint = targetDurationMinutes?.let { " (预计 ${it}分钟)" } ?: ""
                     Toast.makeText(this@GateActivity, "已声明意图$durationHint，请专注使用", Toast.LENGTH_SHORT).show()

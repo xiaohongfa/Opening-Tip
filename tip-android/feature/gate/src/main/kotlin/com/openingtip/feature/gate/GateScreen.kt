@@ -344,7 +344,7 @@ private fun PreviousSessionSection(
                 val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
                 val startTimeStr = timeFormat.format(Date(report.startWallMs))
                 val endTimeStr = report.endWallMs?.let { timeFormat.format(Date(it)) } ?: "--:--"
-                val intentDisplay = report.intentText ?: "未填写意图，仅使用可用软件"
+                val intentDisplay = report.intentText ?: "未填写意图 (仅亮屏或使用可用软件)"
 
                 Text(
                     text = "意图：$intentDisplay",
@@ -353,10 +353,12 @@ private fun PreviousSessionSection(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // 主动研判上次意图是否达成（基于预计时间与实际使用时间自动对比）
+                // 主动研判上次意图是否达成（基于预计时间与真实进入桌面的使用时间对比）
+                val actualMs = if (report.fullDurationMs > 0) report.fullDurationMs else report.totalDurationMs
+                val actualDurationStr = formatDuration(actualMs)
+
                 if (report.targetDurationMinutes != null && report.targetDurationMinutes > 0) {
                     val targetMs = report.targetDurationMinutes * 60 * 1000L
-                    val actualMs = report.totalDurationMs
                     val isAchieved = actualMs <= targetMs
                     val diffMs = Math.abs(actualMs - targetMs)
                     val diffStr = formatDuration(diffMs)
@@ -375,9 +377,9 @@ private fun PreviousSessionSection(
                         ) {
                             Text(
                                 text = if (isAchieved)
-                                    "🟢 按时达成 (预计${report.targetDurationMinutes}分钟 · 提前 $diffStr 锁屏)"
+                                    "🟢 按时达成 (预计${report.targetDurationMinutes}分钟 · 用时 $actualDurationStr · 提前 $diffStr 锁屏)"
                                 else
-                                    "🟠 超时使用 (预计${report.targetDurationMinutes}分钟 · 超时 $diffStr)",
+                                    "🟠 超时使用 (预计${report.targetDurationMinutes}分钟 · 用时 $actualDurationStr · 超时 $diffStr)",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (isAchieved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
@@ -395,7 +397,7 @@ private fun PreviousSessionSection(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "✓ 自律使用 · 持续 ${formatDuration(report.totalDurationMs)}",
+                                text = "✓ 自律使用 · 持续 $actualDurationStr",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -406,7 +408,7 @@ private fun PreviousSessionSection(
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "$startTimeStr ~ $endTimeStr · 共 ${formatDuration(report.totalDurationMs)}",
+                    text = "$startTimeStr ~ $endTimeStr · 专注 $actualDurationStr (总亮屏 ${formatDuration(report.totalDurationMs)})",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
