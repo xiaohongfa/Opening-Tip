@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Consumer 版特定声明，无 DPC 管理员与额外 FGS -->
+</manifest>
