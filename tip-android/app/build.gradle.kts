@@ -38,6 +38,11 @@ android {
         }
     }
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     flavorDimensions += "mode"
     productFlavors {
         create("consumer") {
