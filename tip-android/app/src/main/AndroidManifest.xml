@@ -79,6 +79,19 @@
                 android:value="Screen unlock focus guard" />
         </service>
 
+        <!-- 开屏自律无障碍金钟罩守护服务（系统内核免杀与0ms手势拦截） -->
+        <service
+            android:name=".service.TipAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
         <!-- 开机与更新广播接收器 -->
         <receiver
             android:name=".service.BootReceiver"

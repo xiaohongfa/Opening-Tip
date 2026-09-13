@@ -48,10 +48,19 @@ class GateGuardService : Service() {
     private val database by lazy { (application as TipApplication).database }
 
     @Volatile
-    private var isTipEnabled: Boolean = false
+    var isTipEnabled: Boolean = false
+        internal set
 
     @Volatile
-    private var isSessionUnlocked: Boolean = false
+    var isSessionUnlocked: Boolean = false
+        internal set
+
+    @Volatile
+    private var whitelistCache: Set<String> = emptySet()
+
+    fun isWhitelisted(pkg: String): Boolean {
+        return whitelistCache.contains(pkg)
+    }
 
     private var guardWatcherJob: Job? = null
     private var interactiveSentinelJob: Job? = null
@@ -98,7 +107,7 @@ class GateGuardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /**
-     * 实时感知自律开关与配置状态
+     * 实时感知自律开关与配置状态，并高速缓存白名单
      */
     private fun startObservingControlState() {
         serviceScope.launch {
@@ -108,8 +117,16 @@ class GateGuardService : Service() {
                 if (!isTipEnabled) {
                     isSessionUnlocked = true
                 }
+                val currentWhitelist = database.whitelistDao().getWhitelistPackageNames()
+                whitelistCache = currentWhitelist.toSet()
             } catch (e: Exception) {
                 Log.e(TAG, "Error reading initial control state", e)
+            }
+
+            launch {
+                database.whitelistDao().observeWhitelist().collect { list ->
+                    whitelistCache = list.map { it.packageName }.toSet()
+                }
             }
 
             database.tipControlDao().observeControl().collect { control ->
@@ -273,16 +290,33 @@ class GateGuardService : Service() {
     }
 
     /**
-     * 极速启动 GateActivity，零转场动画延迟 + FullScreenIntent 顶层穿透双保险
+     * 强制瞬间重弹门禁（供无障碍服务与防逃逸拦截调用，低延迟，杜绝被拦截逃逸）
      */
-    fun launchGateActivity() {
+    fun forceLaunchGateActivity() {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastLaunchTime < 1000L || GateActivity.isGateForeground) {
+        if (now - lastLaunchTime < 150L) {
             return
         }
         lastLaunchTime = now
         isSessionUnlocked = false
+        GateActivity.isGateForeground = false
+        launchGateActivityInternal()
+    }
 
+    /**
+     * 极速启动 GateActivity，零转场动画延迟 + FullScreenIntent 顶层穿透双保险
+     */
+    fun launchGateActivity() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLaunchTime < 600L || GateActivity.isGateForeground) {
+            return
+        }
+        lastLaunchTime = now
+        isSessionUnlocked = false
+        launchGateActivityInternal()
+    }
+
+    private fun launchGateActivityInternal() {
         val gateIntent = Intent(this, GateActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or

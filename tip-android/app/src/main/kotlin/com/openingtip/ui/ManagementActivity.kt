@@ -23,7 +23,9 @@ import com.openingtip.core.security.SecretStore
 import com.openingtip.feature.onboarding.AppItem
 import com.openingtip.feature.onboarding.OnboardingScreen
 import com.openingtip.feature.settings.ManagementScreen
+import com.openingtip.feature.settings.PermissionStatusItem
 import com.openingtip.service.GateGuardService
+import com.openingtip.service.TipAccessibilityService
 import java.util.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +41,7 @@ class ManagementActivity : ComponentActivity() {
     // 全局响应式权限状态，在 onResume 时自动触发重检与 Compose 重组
     private val isUsageGrantedState = mutableStateOf(false)
     private val isOverlayGrantedState = mutableStateOf(false)
+    private val permissionItemsState = mutableStateOf<List<PermissionStatusItem>>(emptyList())
 
     override fun onResume() {
         super.onResume()
@@ -89,9 +92,122 @@ class ManagementActivity : ComponentActivity() {
     private fun refreshPermissions() {
         val usage = checkUsageStatsPermission()
         val overlay = checkOverlayPermission()
+        val accessibility = checkAccessibilityPermission()
+        val battery = checkBatteryOptimizationPermission()
+        val notification = checkNotificationPermission()
+        val miuiPopup = checkMiuiOp(10020)
+        val miuiAutostart = checkMiuiOp(10004)
+
         isUsageGrantedState.value = usage
         isOverlayGrantedState.value = overlay
-        android.util.Log.i("ManagementActivity", "refreshPermissions: usage=$usage, overlay=$overlay")
+
+        val isXiaomi = Build.MANUFACTURER.contains("Xiaomi", ignoreCase = true) ||
+                Build.BRAND.contains("Xiaomi", ignoreCase = true) ||
+                Build.BRAND.contains("Redmi", ignoreCase = true)
+
+        val items = mutableListOf<PermissionStatusItem>()
+
+        items.add(
+            PermissionStatusItem(
+                id = "accessibility",
+                title = "自律无障碍金钟罩守护 (系统免杀+0ms防切后台)",
+                description = "Android 内核级最高保护，免除多任务清理误杀，0ms截获手势防止偷玩切后台",
+                isGranted = accessibility,
+                isVital = true,
+                onFix = {
+                    try {
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    } catch (_: Exception) {
+                        openAppDetailsSettings()
+                    }
+                }
+            )
+        )
+
+        items.add(
+            PermissionStatusItem(
+                id = "usage",
+                title = "使用情况访问权限 (应用识别与统计)",
+                description = "用于识别前台应用、防逃逸与记录自律使用时长",
+                isGranted = usage,
+                isVital = true,
+                onFix = {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                }
+            )
+        )
+
+        items.add(
+            PermissionStatusItem(
+                id = "overlay",
+                title = "在其他应用上层显示 (悬浮门禁)",
+                description = "允许开屏自律门禁在手机解锁瞬间覆盖全屏",
+                isGranted = overlay,
+                isVital = true,
+                onFix = {
+                    requestOverlayPermission()
+                }
+            )
+        )
+
+        if (isXiaomi || !miuiPopup) {
+            items.add(
+                PermissionStatusItem(
+                    id = "miui_popup",
+                    title = "后台弹出界面权限 (小米/HyperOS专属)",
+                    description = "小米系统专属权限，开启后解锁即可秒弹门禁界面，杜绝黑屏或延迟",
+                    isGranted = miuiPopup,
+                    isVital = true,
+                    onFix = {
+                        openMiuiPermEditor()
+                    }
+                )
+            )
+        }
+
+        items.add(
+            PermissionStatusItem(
+                id = "battery",
+                title = "电池策略设为无限制 (防后台休眠)",
+                description = "防止系统在锁屏待机时冻结或休眠自律守护进程",
+                isGranted = battery,
+                isVital = true,
+                onFix = {
+                    requestIgnoreBatteryOptimization()
+                }
+            )
+        )
+
+        if (isXiaomi || !miuiAutostart) {
+            items.add(
+                PermissionStatusItem(
+                    id = "miui_autostart",
+                    title = "应用自启动权限 (小米/HyperOS专属)",
+                    description = "开机或重启后自动拉起守护服务，保障自律不中断",
+                    isGranted = miuiAutostart,
+                    isVital = false,
+                    onFix = {
+                        openAutoStartSettings()
+                    }
+                )
+            )
+        }
+
+        items.add(
+            PermissionStatusItem(
+                id = "notification",
+                title = "通知与前台服务权限",
+                description = "维持后台守护常驻通知以及锁屏全屏穿透唤醒",
+                isGranted = notification,
+                isVital = false,
+                onFix = {
+                    openNotificationSettings()
+                }
+            )
+        )
+
+        permissionItemsState.value = items
+        android.util.Log.i("ManagementActivity", "refreshPermissions: items=${items.map { "${it.id}:${it.isGranted}" }}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -210,6 +326,8 @@ class ManagementActivity : ComponentActivity() {
                     allApps = appsWithSelection,
                     sessions = domainSessions,
                     todos = domainTodos,
+                    permissionItems = permissionItemsState.value,
+                    onRefreshPermissions = { refreshPermissions() },
                     onToggleTodo = { id, isCompleted -> handleToggleTodo(id, isCompleted) },
                     onAddTodo = { title, type, targetTime -> handleAddTodo(title, type, targetTime) },
                     onIncrementPermanent = { id -> handleIncrementPermanent(id) },
@@ -325,6 +443,115 @@ class ManagementActivity : ComponentActivity() {
             startActivity(intent)
         } catch (_: Exception) {
             Toast.makeText(this, "请在系统设置中找到「开屏Tip」并开启后台弹出与自启动权限", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun checkAccessibilityPermission(): Boolean {
+        return try {
+            val enabledServices = Settings.Secure.getString(
+                contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val expected = "$packageName/${TipAccessibilityService::class.java.canonicalName}"
+            val expectedShort = "$packageName/.service.TipAccessibilityService"
+            enabledServices.contains(expected) || enabledServices.contains(expectedShort)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun checkBatteryOptimizationPermission(): Boolean {
+        return try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            pm?.isIgnoringBatteryOptimizations(packageName) == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun checkNotificationPermission(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else {
+                androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun checkMiuiOp(op: Int): Boolean {
+        return try {
+            val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+            val method = AppOpsManager::class.java.getMethod(
+                "checkOpNoThrow",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                String::class.java
+            )
+            val mode = method.invoke(appOps, op, Process.myUid(), packageName) as Int
+            mode == AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun openMiuiPermEditor() {
+        try {
+            val intent = Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                putExtra("extra_pkgname", packageName)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    private fun openAutoStartSettings() {
+        try {
+            val intent = Intent().apply {
+                component = android.content.ComponentName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                )
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            openAppDetailsSettings()
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimization() {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {
+                openAppDetailsSettings()
+            }
+        }
+    }
+
+    private fun openNotificationSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                }
+                startActivity(intent)
+            } else {
+                openAppDetailsSettings()
+            }
+        } catch (_: Exception) {
+            openAppDetailsSettings()
         }
     }
 

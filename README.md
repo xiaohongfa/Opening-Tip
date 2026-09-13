@@ -2,7 +2,7 @@
 
 > 🧘 **开屏自律门禁工具，100% 纯血离线运行，意图审视与习惯打卡。**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
+[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
 [![Developer](https://img.shields.io/badge/Developer-%E5%B0%8F%E7%BA%A2Fa-brightgreen.svg)](https://github.com/xiaohongfa)
 [![Organization](https://img.shields.io/badge/Organization-Hyperintell-orange.svg)](https://github.com/xiaohongfa)
 [![Offline](https://img.shields.io/badge/Network-0%20Permissions%20(Offline)-success.svg)](https://github.com/xiaohongfa/Opening-Tip)
@@ -19,9 +19,11 @@
 ## ✨ 核心特性
 
 - 🚪 **开屏意图审视**：解锁屏幕即唤起全屏门禁，审视本次开屏的真实目标；
+- 🥋 **无障碍金钟罩与0ms防逃逸 (杀不掉)**：集成 Android 系统内核最高保活级别的无障碍服务（`BIND_ACCESSIBILITY_SERVICE`），具备 `PERSISTENT_PROC` 优先级，豁免系统多任务一键清理；未输入意图前，0ms瞬间截获桌面滑动手势与多任务面板，强制重回门禁；
+- 🩺 **权限体检与系统防杀中心**：全自动化体检无障碍金钟罩、使用情况统计、悬浮窗、后台弹出界面、电池无限制与开机自启动，提供顶部醒目警示与逐项直达修复通道；
 - 📈 **习惯打卡与热力图**：支持常驻打卡与单次待办，直观呈现打卡热力图统计；
 - 📜 **历史意图与数据主权**：完整记录所有会话意图，支持全量个人数据一键导出与彻底物理抹除；
-- 🛡️ **国产系统深度适配**：针对小米 HyperOS / MIUI 等系统的多任务清理（excludeFromRecents 防误杀）、锁屏亮屏唤起与后台弹出进行深度打磨；
+- 🛡️ **国产系统深度适配**：针对小米 HyperOS / MIUI 等系统的后台弹出权限（AppOps 10020）、多任务防误杀（`excludeFromRecents`）与锁屏穿透进行深度打磨；
 - 🔒 **100% 纯血离线与隐私保护**：未声明任何网络访问权限（INTERNET 为 0），绝无任何云端上报或埋点分析，所有数据完全储存在用户本机私有 SQLite 数据库中。
 
 ---
@@ -30,7 +32,7 @@
 
 * **开发者**：小红Fa
 * **所属组织**：Hyperintell
-* **版本号**：1.0.0
+* **版本号**：v1.0.3 (正式版)
 * **开源协议**：Apache-2.0
 
 ---

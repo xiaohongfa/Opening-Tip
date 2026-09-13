@@ -37,6 +37,8 @@ fun ManagementScreen(
     allApps: List<AppItem>,
     sessions: List<Session>,
     todos: List<TodoItem> = emptyList(),
+    permissionItems: List<PermissionStatusItem> = emptyList(),
+    onRefreshPermissions: () -> Unit = {},
     onToggleTodo: (String, Boolean) -> Unit = { _, _ -> },
     onAddTodo: (String, TodoType, String?) -> Unit = { _, _, _ -> },
     onIncrementPermanent: (String) -> Unit = {},
@@ -53,6 +55,10 @@ fun ManagementScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showClearConfirm by remember { mutableStateOf(false) }
+
+    val missingVitalPermissions = remember(permissionItems) {
+        permissionItems.filter { it.isVital && !it.isGranted }
+    }
 
     Scaffold(
         topBar = {
@@ -83,6 +89,55 @@ fun ManagementScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (missingVitalPermissions.isNotEmpty()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "⚠️ 检测到 ${missingVitalPermissions.size} 项关键防杀权限未开启！",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "可能导致切后台无法拦截或被系统清理误杀，请前往配置。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        FilledTonalButton(
+                            onClick = { selectedTab = 3 },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("去体检", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("习惯与待办") })
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("白名单编辑") })
@@ -113,6 +168,8 @@ fun ManagementScreen(
                 )
                 3 -> SystemStatusTab(
                     isEnabled = isEnabled,
+                    permissionItems = permissionItems,
+                    onRefreshPermissions = onRefreshPermissions,
                     onEnableTipMode = onEnableTipMode,
                     onDisarmTipMode = onDisarmTipMode,
                     onExportData = onExportData,
@@ -347,12 +404,19 @@ private fun HistoryTab(
 @Composable
 private fun SystemStatusTab(
     isEnabled: Boolean,
+    permissionItems: List<PermissionStatusItem> = emptyList(),
+    onRefreshPermissions: () -> Unit = {},
     onEnableTipMode: () -> Unit,
     onDisarmTipMode: () -> Unit,
     onExportData: () -> Unit = {},
     onClearHistory: () -> Unit = {},
     onWipeAllData: () -> Unit = {}
 ) {
+    var showPermissionWarningDialog by remember { mutableStateOf(false) }
+    val missingVital = remember(permissionItems) {
+        permissionItems.filter { it.isVital && !it.isGranted }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -377,7 +441,13 @@ private fun SystemStatusTab(
                         Text("手动关闭 Tip 限制")
                     }
                 } else {
-                    Button(onClick = onEnableTipMode) {
+                    Button(onClick = {
+                        if (missingVital.isNotEmpty()) {
+                            showPermissionWarningDialog = true
+                        } else {
+                            onEnableTipMode()
+                        }
+                    }) {
                         Text("开启 Tip 模式")
                     }
                 }
@@ -386,79 +456,163 @@ private fun SystemStatusTab(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val context = androidx.compose.ui.platform.LocalContext.current
+        // 🛡️ 权限体检与系统防杀中心卡片
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+            colors = CardDefaults.cardColors(
+                containerColor = if (missingVital.isEmpty())
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                else
+                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+            )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("🛡️ 小米/HyperOS/国产系统防杀与保活配置", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "针对小米 HyperOS/MIUI 等系统的后台冻结机制：\n1. 【已默认防误杀】：本应用已从系统多任务列表中隐藏，您在多任务界面一键清理后台时绝不会误杀自律服务；\n2. 【后台弹出与无限制】：请点击下方按钮开启「后台弹出界面」并将省电策略设为「无限制」，确保在其他应用中锁屏后再解锁百分之百秒弹门禁。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(
-                        onClick = {
-                            try {
-                                val intent = android.content.Intent("miui.intent.action.APP_PERM_EDITOR").apply {
-                                    putExtra("extra_pkgname", context.packageName)
-                                }
-                                context.startActivity(intent)
-                            } catch (_: Exception) {
-                                val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = android.net.Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
-                            }
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("后台弹出/锁屏显示", fontSize = 11.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "🛡️ 权限体检与系统防杀中心",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (missingVital.isEmpty()) "✓ 所有核心防杀与防逃逸权限已就绪 (真·杀不掉)" else "⚠️ 存在 ${missingVital.size} 项关键防杀权限未开启",
+                            fontSize = 12.sp,
+                            color = if (missingVital.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     FilledTonalButton(
-                        onClick = {
-                            try {
-                                val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = android.net.Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
-                            } catch (_: Exception) {
-                                val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                context.startActivity(intent)
-                            }
-                        },
-                        modifier = Modifier.weight(1f)
+                        onClick = onRefreshPermissions,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Text("电池设为无限制", fontSize = 11.sp)
+                        Text("重新体检", fontSize = 11.sp)
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        try {
-                            val intent = android.content.Intent().apply {
-                                component = android.content.ComponentName(
-                                    "com.miui.securitycenter",
-                                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (permissionItems.isEmpty()) {
+                    Text("暂无权限检查项", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                } else {
+                    permissionItems.forEachIndexed { index, item ->
+                        if (index > 0) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = item.title,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                    if (item.isVital) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = if (item.isGranted)
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            else
+                                                MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "核心",
+                                                fontSize = 10.sp,
+                                                color = if (item.isGranted)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = item.description,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            context.startActivity(intent)
-                        } catch (_: Exception) {
-                            val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = android.net.Uri.parse("package:${context.packageName}")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            if (item.isGranted) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "已就绪",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            } else {
+                                Button(
+                                    onClick = item.onFix,
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    colors = if (item.isVital)
+                                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    else
+                                        ButtonDefaults.buttonColors()
+                                ) {
+                                    Text("去开启", fontSize = 11.sp)
+                                }
                             }
-                            context.startActivity(intent)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("前往设置自启动", fontSize = 12.sp)
+                    }
                 }
             }
+        }
+
+        if (showPermissionWarningDialog) {
+            AlertDialog(
+                onDismissRequest = { showPermissionWarningDialog = false },
+                icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                title = { Text("⚠️ 关键防杀权限未全部开启") },
+                text = {
+                    Column {
+                        Text("以下关键权限尚未开启：", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        missingVital.forEach {
+                            Text("• ${it.title}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "未开启无障碍金钟罩或后台弹出权限，手速过快可能可以切到桌面或多任务清理被强杀。\n\n建议前往体检中心配置，是否仍要强行开启？",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showPermissionWarningDialog = false
+                            onEnableTipMode()
+                        }
+                    ) {
+                        Text("仍要强行开启")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPermissionWarningDialog = false }) {
+                        Text("去逐一开启")
+                    }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
