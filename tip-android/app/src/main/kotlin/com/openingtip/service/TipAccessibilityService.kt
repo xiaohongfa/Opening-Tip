@@ -29,8 +29,7 @@ class TipAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
-        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
-            type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
+        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return
@@ -38,17 +37,19 @@ class TipAccessibilityService : AccessibilityService() {
         val guard = GateGuardService.instance
         if (guard != null) {
             if (guard.isTipEnabled && !guard.isSessionUnlocked) {
-                // 如果当前前台既不是门禁自身，也不是白名单授权软件
-                if (!guard.isWhitelisted(pkg)) {
-                    Log.w(TAG, "Accessibility intercepted unapproved window: $pkg while locked! Reasserting gate instantly!")
-                    // 若用户试图呼出多任务管理或回到桌面，尝试收起桌面/多任务界面
-                    if (pkg == "com.miui.home" || pkg == "com.android.systemui" || pkg.contains("launcher", ignoreCase = true)) {
-                        try {
-                            performGlobalAction(GLOBAL_ACTION_BACK)
-                        } catch (_: Exception) {}
-                    }
-                    launchGateDirectly()
+                // 如果当前窗口属于合法放行范围（白名单应用、已启用输入法键盘、系统基础框架UI或来电界面），完全放行
+                if (guard.isPackageAllowedWhileLocked(pkg)) {
+                    return
                 }
+
+                // 如果处于白名单应用启动过渡保护期内，暂不抢弹以确保应用正常冷启动
+                if (guard.isWhitelistedAppLaunching()) {
+                    Log.d(TAG, "Ignoring window transition to $pkg during launch grace period")
+                    return
+                }
+
+                Log.w(TAG, "Accessibility intercepted unapproved window: $pkg while locked! Reasserting gate instantly!")
+                launchGateDirectly()
             }
         } else {
             // Guard 实例若未初始化，自愈拉起

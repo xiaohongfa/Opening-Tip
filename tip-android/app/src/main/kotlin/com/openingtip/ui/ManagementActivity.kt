@@ -568,6 +568,7 @@ class ManagementActivity : ComponentActivity() {
                     val actInfo = resolveInfo.activityInfo ?: return@mapNotNull null
                     val pkg = actInfo.packageName ?: return@mapNotNull null
                     if (pkg == packageName) return@mapNotNull null
+                    if (com.openingtip.core.platform.SystemPackageHelper.isLauncher(this, pkg)) return@mapNotNull null
                     val label = try {
                         resolveInfo.loadLabel(pm)?.toString() ?: pkg
                     } catch (_: Exception) {

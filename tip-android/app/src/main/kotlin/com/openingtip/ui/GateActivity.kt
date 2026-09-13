@@ -406,8 +406,13 @@ class GateActivity : ComponentActivity() {
     private fun launchAppPackage(pkg: String) {
         try {
             isLaunchingWhitelistApp = true
-            val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
+            GateGuardService.instance?.notifyWhitelistedAppLaunch(pkg)
+            val launchIntent = getAppLaunchIntent(pkg)
             if (launchIntent != null) {
+                launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
                 startActivity(launchIntent)
             } else {
                 Toast.makeText(this, "无法启动应用: $pkg", Toast.LENGTH_SHORT).show()
@@ -417,6 +422,48 @@ class GateActivity : ComponentActivity() {
             Toast.makeText(this, "启动异常: ${e.message}", Toast.LENGTH_SHORT).show()
             isLaunchingWhitelistApp = false
         }
+    }
+
+    private fun getAppLaunchIntent(pkg: String): Intent? {
+        val pm = packageManager
+        // 1. 标准启动 Intent
+        pm.getLaunchIntentForPackage(pkg)?.let { return it }
+
+        // 2. Leanback 电视/平板启动 Intent
+        pm.getLeanbackLaunchIntentForPackage(pkg)?.let { return it }
+
+        // 3. 回退策略：按包名查询带有 MAIN + LAUNCHER 的 Activity
+        try {
+            val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(pkg)
+            }
+            val resolves = pm.queryIntentActivities(launcherIntent, 0)
+            if (resolves.isNotEmpty()) {
+                val act = resolves[0].activityInfo
+                return Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setClassName(act.packageName, act.name)
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 4. 回退策略：按包名查询任何可导出的 MAIN Activity
+        try {
+            val mainIntent = Intent(Intent.ACTION_MAIN).apply {
+                setPackage(pkg)
+            }
+            val resolves = pm.queryIntentActivities(mainIntent, 0)
+            val best = resolves.firstOrNull { it.activityInfo.exported } ?: resolves.firstOrNull()
+            if (best != null) {
+                val act = best.activityInfo
+                return Intent(Intent.ACTION_MAIN).apply {
+                    setClassName(act.packageName, act.name)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return null
     }
 
     private fun handleToggleTodo(id: String, isCompleted: Boolean) {

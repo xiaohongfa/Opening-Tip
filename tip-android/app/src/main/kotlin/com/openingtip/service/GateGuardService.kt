@@ -28,6 +28,7 @@ import com.openingtip.core.model.SegmentKind
 import com.openingtip.core.model.SessionEndReason
 import com.openingtip.core.model.SessionState
 import com.openingtip.core.model.SessionStatus
+import com.openingtip.core.platform.SystemPackageHelper
 import com.openingtip.core.platform.SystemScreenReceiver
 import com.openingtip.ui.GateActivity
 import com.openingtip.ui.ManagementActivity
@@ -64,6 +65,40 @@ class GateGuardService : Service() {
 
     fun isWhitelisted(pkg: String): Boolean {
         return whitelistCache.contains(pkg)
+    }
+
+    @Volatile
+    private var lastWhitelistedLaunchTime: Long = 0L
+    @Volatile
+    private var currentWhitelistedPkg: String? = null
+
+    /**
+     * 当用户在门禁中点击白名单应用时调用，授予 1500ms 的启动过渡保护期
+     */
+    fun notifyWhitelistedAppLaunch(pkg: String) {
+        lastWhitelistedLaunchTime = SystemClock.elapsedRealtime()
+        currentWhitelistedPkg = pkg
+        Log.i(TAG, "Whitelisted app launch notified: $pkg (granted 1500ms transition grace period)")
+    }
+
+    /**
+     * 判断当前是否处于白名单应用启动保护期内（避免冷启动过渡时误判拉回）
+     */
+    fun isWhitelistedAppLaunching(): Boolean {
+        val elapsed = SystemClock.elapsedRealtime() - lastWhitelistedLaunchTime
+        return elapsed in 0..1500L
+    }
+
+    /**
+     * 判断指定包名在未解锁阶段是否合法放行（白名单应用、已启用输入法、系统基础框架UI、权限与来电界面等）
+     */
+    fun isPackageAllowedWhileLocked(pkg: String): Boolean {
+        if (pkg == packageName) return true
+        if (isWhitelisted(pkg)) return true
+        if (pkg == currentWhitelistedPkg) return true
+        if (SystemPackageHelper.isSystemAuxiliaryPackage(pkg)) return true
+        if (SystemPackageHelper.isInputMethod(this, pkg)) return true
+        return false
     }
 
     private var guardWatcherJob: Job? = null
@@ -442,10 +477,15 @@ class GateGuardService : Service() {
         guardWatcherJob?.cancel()
         guardWatcherJob = serviceScope.launch {
             while (isActive && isTipEnabled && !isSessionUnlocked) {
-                delay(150)
+                delay(300)
                 if (isTipEnabled && !isSessionUnlocked && !GateActivity.isGateForeground) {
+                    // 若处于白名单应用启动过渡保护期，暂不强弹拉回
+                    if (isWhitelistedAppLaunching()) {
+                        continue
+                    }
                     val top = getForegroundPackage()
-                    if (top != null && top != packageName && !isWhitelistPackage(top)) {
+                    if (top != null && !isPackageAllowedWhileLocked(top)) {
+                        Log.w(TAG, "GuardWatcher intercepted unapproved package: $top, reasserting gate")
                         withContext(Dispatchers.Main) {
                             launchGateActivity()
                         }
