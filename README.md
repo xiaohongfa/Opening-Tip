@@ -2,7 +2,7 @@
 
 > 🧘 **开屏自律门禁工具，100% 纯血离线运行，意图审视与习惯打卡。**
 
-[![Version](https://img.shields.io/badge/version-1.0.4-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
 [![Developer](https://img.shields.io/badge/Developer-%E5%B0%8F%E7%BA%A2Fa-brightgreen.svg)](https://github.com/xiaohongfa)
 [![Organization](https://img.shields.io/badge/Organization-Hyperintell-orange.svg)](https://github.com/xiaohongfa)
 [![Offline](https://img.shields.io/badge/Network-0%20Permissions%20(Offline)-success.svg)](https://github.com/xiaohongfa/Opening-Tip)
@@ -24,7 +24,7 @@
 - 🏷️ **自定义快捷意图标签**：内置高频动作标签，并支持用户自由增删改与持久化自定义（如回工作、背单词、查资料等）；
 - 📊 **今日自律看板**：开屏顶部直观呈现当前高清时钟、**今日第 N 次点亮屏幕次数**以及**今日累计使用时长**；
 - 🌿 **日常健康微习惯提示**：门禁底部呈现深呼吸、喝温水润喉、眺望远方、舒展肩颈等温馨身心关怀提示；
-- 🥋 **无障碍金钟罩与0ms防逃逸 (杀不掉)**：集成 Android 系统内核最高保活级别的无障碍服务（`BIND_ACCESSIBILITY_SERVICE`），具备 `PERSISTENT_PROC` 优先级，豁免系统多任务一键清理；未输入意图前，0ms瞬间截获桌面滑动手势与多任务面板，强制重回门禁；
+- 🥋 **无障碍金钟罩与0ms防逃逸 (杀不掉)**：集成 Android 系统内核最高保活级别的无障碍服务（`BIND_ACCESSIBILITY_SERVICE`），具备 `PERSISTENT_PROC` 优先级，豁免系统多任务一键清理；未输入意图前，0ms瞬间截获桌面滑动手势与按键，强制重回门禁；
 - 🩺 **权限体检与系统防杀中心**：全自动化体检无障碍金钟罩、使用情况统计、悬浮窗、后台弹出界面、电池无限制与开机自启动，提供顶部醒目警示与逐项直达修复通道；
 - 📈 **习惯打卡与热力图**：支持常驻打卡与单次待办，直观呈现打卡热力图统计；
 - 📜 **历史意图与数据主权**：完整记录所有会话意图，支持全量个人数据一键导出与彻底物理抹除；
@@ -37,7 +37,7 @@
 
 * **开发者**：小红Fa
 * **所属组织**：Hyperintell
-* **版本号**：v1.0.4 (正式版)
+* **版本号**：v1.0.5 (正式版)
 * **开源协议**：Apache-2.0
 
 ---

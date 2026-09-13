@@ -110,12 +110,13 @@ class ManagementActivity : ComponentActivity() {
         items.add(
             PermissionStatusItem(
                 id = "accessibility",
-                title = "自律无障碍金钟罩守护 (系统免杀+0ms防切后台)",
-                description = "Android 内核级最高保护，免除多任务清理误杀，0ms截获手势防止偷玩切后台",
+                title = "无障碍金钟罩守护 (系统免杀+0ms防切后台)",
+                description = "👉 步骤：点击【去开启】-> 点击【已下载的应用】-> 开启【开屏Tip】。提供 0ms 手势截杀与后台秒弹",
                 isGranted = accessibility,
                 isVital = true,
                 onFix = {
                     try {
+                        Toast.makeText(this@ManagementActivity, "👉 请在系统页点击【已下载的应用】-> 开启【开屏Tip】", Toast.LENGTH_LONG).show()
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     } catch (_: Exception) {
                         openAppDetailsSettings()

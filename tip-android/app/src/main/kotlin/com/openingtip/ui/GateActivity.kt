@@ -293,15 +293,6 @@ class GateActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             hideSystemBars()
-        } else {
-            // 用户手速极快试图拉出系统多任务面板或状态栏
-            if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
-                @Suppress("DEPRECATION")
-                try {
-                    sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-                } catch (_: Exception) {}
-                reassertGateForeground()
-            }
         }
     }
 
@@ -314,8 +305,8 @@ class GateActivity : ComponentActivity() {
                 val h = window.decorView.height
                 val w = window.decorView.width
                 if (h > 0 && w > 0) {
-                    // 排除底部 20% 区域的系统导航手势响应（防止上滑回桌面手势生效）
-                    val bottomHeight = (h * 0.2f).toInt()
+                    // 排除边缘系统导航手势响应（防止误触回桌面手势生效）
+                    val bottomHeight = (h * 0.15f).toInt()
                     val rect = android.graphics.Rect(0, h - bottomHeight, w, h)
                     window.decorView.systemGestureExclusionRects = listOf(rect)
                 }
@@ -325,30 +316,20 @@ class GateActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // 用户尝试底部上滑（回到桌面或切多任务）
+        // 用户尝试底部上滑（回到桌面或切多任务），通知守护服务立即就绪
         if (!isIntentSubmitted && !isLaunchingWhitelistApp) {
-            @Suppress("DEPRECATION")
-            try {
-                sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-            } catch (_: Exception) {}
-            reassertGateForeground()
+            GateGuardService.instance?.forceLaunchGateActivity()
         }
     }
 
     override fun onPause() {
         super.onPause()
         isGateForeground = false
-        if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
-            reassertGateForeground()
-        }
     }
 
     override fun onStop() {
         super.onStop()
         isGateForeground = false
-        if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isFinishing) {
-            reassertGateForeground()
-        }
     }
 
     override fun onDestroy() {
@@ -520,20 +501,6 @@ class GateActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             database.todoDao().clearCompletedShortTermTodos()
         }
-    }
-
-    private fun reassertGateForeground() {
-        try {
-            val intent = Intent(this, GateActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        Intent.FLAG_ACTIVITY_NO_ANIMATION or
-                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
-            }
-            startActivity(intent)
-            Toast.makeText(this, "自律门禁生效中：请先完成打卡或输入本次意图", Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {}
     }
 
     companion object {

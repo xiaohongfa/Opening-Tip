@@ -1,5 +1,6 @@
 package com.openingtip.service
 
+import android.app.ActivityOptions
 import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.app.NotificationChannel
@@ -304,47 +305,63 @@ class GateGuardService : Service() {
     }
 
     /**
-     * 极速启动 GateActivity，零转场动画延迟 + FullScreenIntent 顶层穿透双保险
+     * 极速启动 GateActivity，优先无障碍穿透 + 零转场动画延迟 + FullScreenIntent 顶层穿透三保险
      */
     fun launchGateActivity() {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastLaunchTime < 600L || GateActivity.isGateForeground) {
+        if (now - lastLaunchTime < 300L) {
             return
         }
         lastLaunchTime = now
         isSessionUnlocked = false
+        GateActivity.isGateForeground = false
         launchGateActivityInternal()
     }
 
     private fun launchGateActivityInternal() {
+        // 1. 如果无障碍守护服务已经就绪，由享有安卓 BAL 豁免特权的无障碍服务直接拉起（100%穿透后台限制）
+        val a11y = TipAccessibilityService.instance
+        if (a11y != null) {
+            a11y.launchGateDirectly()
+            Log.i(TAG, "GateActivity launched via AccessibilityService (BAL exempt)")
+            return
+        }
+
         val gateIntent = Intent(this, GateActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP or
                     Intent.FLAG_ACTIVITY_NO_ANIMATION or
                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
         }
 
-        // 1. 常规 startActivity 启动
+        // 2. 常规 startActivity 启动
         try {
             startActivity(gateIntent)
             Log.i(TAG, "GateActivity launched directly with zero animation")
         } catch (e: Exception) {
             Log.w(TAG, "Direct startActivity failed, fallback to PendingIntent", e)
-            try {
-                val pi = PendingIntent.getActivity(
-                    this,
-                    POPUP_REQUEST_CODE,
-                    gateIntent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                )
-                pi.send()
-            } catch (e2: Exception) {
-                Log.e(TAG, "PendingIntent also failed", e2)
-            }
         }
 
-        // 2. 发送 FullScreenIntent 高优先级顶层穿透通知（由 Android SystemUI 直接接管顶层绘制，突破国产系统后台弹出限制）
+        // 3. PendingIntent 启动（适配 Android 14+：显式授权后台启动）
+        try {
+            val pi = PendingIntent.getActivity(
+                this,
+                POPUP_REQUEST_CODE,
+                gateIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val options = ActivityOptions.makeBasic().apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    pendingIntentBackgroundActivityStartMode = ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                }
+            }
+            pi.send(this, 0, null, null, null, null, options.toBundle())
+        } catch (e2: Exception) {
+            Log.e(TAG, "PendingIntent also failed", e2)
+        }
+
+        // 4. 发送 FullScreenIntent 高优先级顶层穿透通知
         try {
             val fullScreenPendingIntent = PendingIntent.getActivity(
                 this,
