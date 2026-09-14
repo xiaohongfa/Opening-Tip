@@ -3,6 +3,7 @@ package com.openingtip.ui
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
@@ -21,10 +22,12 @@ import androidx.lifecycle.lifecycleScope
 import com.openingtip.TipApplication
 import com.openingtip.core.database.entity.SessionSegmentEntity
 import com.openingtip.core.database.entity.TodoItemEntity
+import com.openingtip.core.database.entity.toDomainModel
 import com.openingtip.core.model.*
 import com.openingtip.core.security.SecretManager
 import com.openingtip.core.security.SecretStore
 import com.openingtip.core.platform.DataExportManager
+import com.openingtip.data.usage.UsageStatsRepository
 import com.openingtip.feature.gate.GateAppUsageItem
 import com.openingtip.feature.gate.GateSessionSummary
 import com.openingtip.feature.gate.GateScreen
@@ -51,6 +54,7 @@ class GateActivity : ComponentActivity() {
     private val database by lazy { app.database }
     private val secretManager by lazy { SecretManager() }
     private val secretStore by lazy { SecretStore(this, secretManager) }
+    private val usageStatsRepository by lazy { UsageStatsRepository(this, database) }
 
     private var isLaunchingWhitelistApp = false
     @Volatile
@@ -164,7 +168,21 @@ class GateActivity : ComponentActivity() {
                                 val prevSessionEntity = database.sessionDao().getBestPreviousClosedSession(control?.activeSessionId)
                                 if (prevSessionEntity != null) {
                                     val segs = database.sessionDao().getSegmentsForSession(prevSessionEntity.id)
-                                    val summaries = database.usageDao().getAppSummariesForSession(prevSessionEntity.id)
+                                    var summaries = database.usageDao().getAppSummariesForSession(prevSessionEntity.id)
+
+                                    // 依据规范 6：下次 Gate 打开时执行幂等补偿重算
+                                    if (summaries.isEmpty() && segs.isNotEmpty()) {
+                                        try {
+                                            usageStatsRepository.reconcileSession(
+                                                prevSessionEntity.toDomainModel(),
+                                                segs.map { it.toDomainModel() }
+                                            )
+                                            summaries = database.usageDao().getAppSummariesForSession(prevSessionEntity.id)
+                                        } catch (reconcileErr: Exception) {
+                                            Log.w("GateActivity", "Reconciliation compensation skipped: ${reconcileErr.message}")
+                                        }
+                                    }
+
                                     val restrictedMs = segs.filter { it.kind == "RESTRICTED" }.sumOf { it.durationMs }
                                     val fullMs = segs.filter { it.kind == "FULL" }.sumOf { it.durationMs }
 
@@ -285,6 +303,14 @@ class GateActivity : ComponentActivity() {
                 withContext(Dispatchers.Main) {
                     finish()
                 }
+            } else {
+                try {
+                    val now = System.currentTimeMillis()
+                    val elapsed = SystemClock.elapsedRealtime()
+                    database.sessionDao().getOrCreateRestrictedSession("boot-$now", now, elapsed)
+                } catch (e: Exception) {
+                    Log.e("GateActivity", "Error ensuring canonical session in onResume", e)
+                }
             }
         }
     }
@@ -351,14 +377,12 @@ class GateActivity : ComponentActivity() {
             if (isSecret) {
                 // 暗号关闭：先落盘更新状态为 DISARMED
                 val now = System.currentTimeMillis()
-                if (activeSessionId != null) {
-                    database.sessionDao().closeSessionIfOpen(
-                        sessionId = activeSessionId,
-                        endWallMs = now,
-                        endElapsedMs = null,
-                        endReason = SessionEndReason.DISARMED_BY_SECRET.name
-                    )
-                }
+                database.sessionDao().closeSessionIfOpen(
+                    sessionId = activeSessionId ?: "",
+                    endWallMs = now,
+                    endElapsedMs = null,
+                    endReason = SessionEndReason.DISARMED_BY_SECRET.name
+                )
                 database.tipControlDao().updateEnabled(false, SessionState.DISARMED.name)
                 database.tipControlDao().updateActiveSessionId(null)
 
@@ -371,28 +395,25 @@ class GateActivity : ComponentActivity() {
                     finish() // 门禁关闭，显现原装系统桌面
                 }
             } else {
-                // 提交本次意图：先持久化写入数据库进入 FULL 模式
+                // 提交本次意图：统一调用原子事务 submitIntentAndEnterFull
                 val now = System.currentTimeMillis()
-                if (activeSessionId != null) {
-                    val fullSeg = SessionSegmentEntity(
-                        id = UUID.randomUUID().toString(),
-                        sessionId = activeSessionId,
-                        kind = SegmentKind.FULL.name,
-                        startWallMs = now
-                    )
-                    database.sessionDao().switchToFull(
-                        sessionId = activeSessionId,
-                        currentSegmentId = "",
-                        newSegment = fullSeg,
-                        intentText = input.trim(),
-                        targetDurationMinutes = targetDurationMinutes,
-                        switchWallMs = now,
-                        switchElapsedMs = null
-                    )
-                }
-                database.tipControlDao().updateEnabled(true, SessionState.FULL.name)
+                val elapsed = SystemClock.elapsedRealtime()
+                val success = database.sessionDao().submitIntentAndEnterFull(
+                    sessionId = activeSessionId,
+                    intentText = input.trim(),
+                    targetDurationMinutes = targetDurationMinutes,
+                    switchWallMs = now,
+                    switchElapsedMs = elapsed
+                )
 
-                // 数据库事务全部成功后，才标记内存放行并启动倒计时
+                if (!success) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@GateActivity, "会话状态异常，请重试提交意图", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                // 数据库事务完全成功后，才标记放行并启动倒计时
                 isIntentSubmitted = true
                 GateGuardService.markSessionUnlocked()
                 if (targetDurationMinutes != null && targetDurationMinutes > 0) {

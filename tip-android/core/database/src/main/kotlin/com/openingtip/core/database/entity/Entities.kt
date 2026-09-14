@@ -1,6 +1,7 @@
 package com.openingtip.core.database.entity
 
 import androidx.room.*
+import com.openingtip.core.model.*
 
 @Entity(tableName = "tip_control")
 data class TipControlEntity(
@@ -109,6 +110,38 @@ data class SessionSegmentEntity(
     val whitelistRevision: Long? = null,
     val durationMs: Long = 0L
 )
+
+fun SessionEntity.toDomainModel(): Session = Session(
+    id = id,
+    userSerial = userSerial,
+    bootId = bootId,
+    startWallMs = startWallMs,
+    startElapsedMs = startElapsedMs,
+    endWallMs = endWallMs,
+    endElapsedMs = endElapsedMs,
+    status = runCatching { SessionStatus.valueOf(status) }.getOrDefault(SessionStatus.OPEN),
+    intentText = intentText,
+    intentSubmittedAt = intentSubmittedAt,
+    endReason = endReason?.let { runCatching { SessionEndReason.valueOf(it) }.getOrNull() },
+    quality = runCatching { QualityRating.valueOf(quality) }.getOrDefault(QualityRating.PRECISE),
+    qualityReasons = qualityReasons,
+    durationMs = durationMs,
+    statsRevision = statsRevision,
+    createdAt = createdAt
+)
+
+fun SessionSegmentEntity.toDomainModel(): SessionSegment = SessionSegment(
+    id = id,
+    sessionId = sessionId,
+    kind = runCatching { SegmentKind.valueOf(kind) }.getOrDefault(SegmentKind.RESTRICTED),
+    startWallMs = startWallMs,
+    endWallMs = endWallMs,
+    startElapsedMs = startElapsedMs,
+    endElapsedMs = endElapsedMs,
+    whitelistRevision = whitelistRevision,
+    durationMs = durationMs
+)
+
 
 @Entity(
     tableName = "usage_slice",
@@ -246,3 +279,15 @@ data class TodoItemEntity(
     val sortOrder: Int = 0
 )
 
+@Entity(tableName = "focus_timer")
+data class FocusTimerEntity(
+    @PrimaryKey val singletonId: Int = 1,
+    val sessionId: String? = null,
+    val timerStartedWallMs: Long = 0L,
+    val timerStartedElapsedMs: Long = 0L,
+    val timerDeadlineWallMs: Long = 0L,
+    val timerDeadlineElapsedMs: Long = 0L,
+    val timerTotalSeconds: Int = 0,
+    val timerIntentText: String = "",
+    val timerStatus: String = "STOPPED" // RUNNING | STOPPED
+)

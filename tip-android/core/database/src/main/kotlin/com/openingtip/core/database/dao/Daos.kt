@@ -134,6 +134,88 @@ interface SessionDao {
         }
     }
 
+    @Query("UPDATE tip_control SET state = :state, activeSessionId = :activeSessionId WHERE singletonId = 1")
+    suspend fun updateTipControlStateAndSession(state: String, activeSessionId: String?)
+
+    @Transaction
+    suspend fun getOrCreateRestrictedSession(
+        bootId: String,
+        timestamp: Long = System.currentTimeMillis(),
+        elapsedMs: Long? = null
+    ): String {
+        val existing = getOpenSession()
+        if (existing != null) {
+            updateTipControlStateAndSession("RESTRICTED", existing.id)
+            return existing.id
+        }
+
+        val newSessionId = java.util.UUID.randomUUID().toString()
+        val session = SessionEntity(
+            id = newSessionId,
+            bootId = bootId,
+            startWallMs = timestamp,
+            startElapsedMs = elapsedMs,
+            status = "OPEN"
+        )
+        val initialSegment = SessionSegmentEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            sessionId = newSessionId,
+            kind = "RESTRICTED",
+            startWallMs = timestamp,
+            startElapsedMs = elapsedMs
+        )
+        insertSession(session)
+        insertSegment(initialSegment)
+        updateTipControlStateAndSession("RESTRICTED", newSessionId)
+        return newSessionId
+    }
+
+    @Transaction
+    suspend fun submitIntentAndEnterFull(
+        sessionId: String?,
+        intentText: String,
+        targetDurationMinutes: Int? = null,
+        switchWallMs: Long = System.currentTimeMillis(),
+        switchElapsedMs: Long? = null
+    ): Boolean {
+        val session = (sessionId?.let { getSessionById(it) }?.takeIf { it.status == "OPEN" })
+            ?: getOpenSession()
+            ?: return false
+
+        val currentSeg = getOpenSegmentForSession(session.id)
+        if (currentSeg == null || currentSeg.kind != "RESTRICTED") {
+            return false
+        }
+
+        updateSegment(
+            currentSeg.copy(
+                endWallMs = switchWallMs,
+                endElapsedMs = switchElapsedMs,
+                durationMs = (switchWallMs - currentSeg.startWallMs).coerceAtLeast(0L)
+            )
+        )
+
+        val fullSeg = SessionSegmentEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            sessionId = session.id,
+            kind = "FULL",
+            startWallMs = switchWallMs,
+            startElapsedMs = switchElapsedMs
+        )
+        insertSegment(fullSeg)
+
+        updateSession(
+            session.copy(
+                intentText = intentText,
+                targetDurationMinutes = targetDurationMinutes,
+                intentSubmittedAt = switchWallMs
+            )
+        )
+
+        updateTipControlStateAndSession("FULL", session.id)
+        return true
+    }
+
     @Transaction
     suspend fun getOrCreateCanonicalOpenSession(
         session: SessionEntity,
@@ -141,10 +223,12 @@ interface SessionDao {
     ): String {
         val existing = getOpenSession()
         return if (existing != null) {
+            updateTipControlStateAndSession("RESTRICTED", existing.id)
             existing.id
         } else {
             insertSession(session)
             insertSegment(initialSegment)
+            updateTipControlStateAndSession("RESTRICTED", session.id)
             session.id
         }
     }
@@ -185,11 +269,12 @@ interface SessionDao {
         endWallMs: Long,
         endElapsedMs: Long?,
         endReason: String
-    ) {
-        val session = getSessionById(sessionId) ?: return
-        if (session.status != "OPEN") return
+    ): String? {
+        val session = (getSessionById(sessionId)?.takeIf { it.status == "OPEN" })
+            ?: getOpenSession()
+            ?: return null
 
-        val openSeg = getOpenSegmentForSession(sessionId)
+        val openSeg = getOpenSegmentForSession(session.id)
         if (openSeg != null) {
             updateSegment(
                 openSeg.copy(
@@ -209,6 +294,7 @@ interface SessionDao {
                 durationMs = (endWallMs - session.startWallMs).coerceAtLeast(0L)
             )
         )
+        return session.id
     }
 }
 
@@ -309,5 +395,23 @@ interface TodoDao {
 
     @Query("DELETE FROM todo_item WHERE type = 'SHORT_TERM' AND isCompleted = 1")
     suspend fun clearCompletedShortTermTodos()
+}
+
+@Dao
+interface FocusTimerDao {
+    @Query("SELECT * FROM focus_timer WHERE singletonId = 1")
+    suspend fun getTimer(): FocusTimerEntity?
+
+    @Query("SELECT * FROM focus_timer WHERE singletonId = 1")
+    fun observeTimer(): Flow<FocusTimerEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTimer(timer: FocusTimerEntity)
+
+    @Query("UPDATE focus_timer SET timerStatus = :status WHERE singletonId = 1")
+    suspend fun updateTimerStatus(status: String)
+
+    @Query("DELETE FROM focus_timer WHERE singletonId = 1")
+    suspend fun clearTimer()
 }
 

@@ -22,14 +22,17 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.openingtip.R
 import com.openingtip.TipApplication
+import com.openingtip.core.database.entity.FocusTimerEntity
 import com.openingtip.core.database.entity.SessionEntity
 import com.openingtip.core.database.entity.SessionSegmentEntity
+import com.openingtip.core.database.entity.toDomainModel
 import com.openingtip.core.model.SegmentKind
 import com.openingtip.core.model.SessionEndReason
 import com.openingtip.core.model.SessionState
 import com.openingtip.core.model.SessionStatus
 import com.openingtip.core.platform.SystemPackageHelper
 import com.openingtip.core.platform.SystemScreenReceiver
+import com.openingtip.data.usage.UsageStatsRepository
 import com.openingtip.ui.GateActivity
 import com.openingtip.ui.ManagementActivity
 import java.util.*
@@ -51,6 +54,7 @@ class GateGuardService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var screenReceiver: SystemScreenReceiver? = null
     private val database by lazy { (application as TipApplication).database }
+    private val usageStatsRepository by lazy { UsageStatsRepository(this, database) }
 
     @Volatile
     var isTipEnabled: Boolean = false
@@ -130,6 +134,7 @@ class GateGuardService : Service() {
         startObservingControlState()
         registerScreenStateReceiver()
         startInteractiveSentinel()
+        restoreFocusTimerIfActive()
         Log.i(TAG, "GateGuardService onCreate: 守护服务已全面就绪 (双通道哨兵已激活)")
     }
 
@@ -145,6 +150,9 @@ class GateGuardService : Service() {
             }
             else -> {
                 startAsForeground()
+                if (focusTimerJob == null) {
+                    restoreFocusTimerIfActive()
+                }
             }
         }
         return START_STICKY
@@ -293,19 +301,38 @@ class GateGuardService : Service() {
 
         serviceScope.launch {
             try {
+                // 停止持久化倒计时
+                database.focusTimerDao().updateTimerStatus("STOPPED")
+
                 val control = database.tipControlDao().getControl()
                 if (control != null && control.enabled && control.whitelistConfirmed) {
                     val now = System.currentTimeMillis()
-                    control.activeSessionId?.let { activeId ->
-                        database.sessionDao().closeSessionIfOpen(
-                            sessionId = activeId,
-                            endWallMs = now,
-                            endElapsedMs = null,
-                            endReason = SessionEndReason.SCREEN_OFF.name
-                        )
-                    }
+                    val activeId = control.activeSessionId ?: ""
+                    val closedId = database.sessionDao().closeSessionIfOpen(
+                        sessionId = activeId,
+                        endWallMs = now,
+                        endElapsedMs = null,
+                        endReason = SessionEndReason.SCREEN_OFF.name
+                    )
                     database.tipControlDao().updateEnabled(true, SessionState.RESTRICTED.name)
                     database.tipControlDao().updateActiveSessionId(null)
+
+                    // 依据规范 6：在 Session close 后异步进行 UsageStats reconciliation
+                    if (closedId != null) {
+                        try {
+                            val sessionEntity = database.sessionDao().getSessionById(closedId)
+                            val segments = database.sessionDao().getSegmentsForSession(closedId)
+                            if (sessionEntity != null && segments.isNotEmpty()) {
+                                usageStatsRepository.reconcileSession(
+                                    sessionEntity.toDomainModel(),
+                                    segments.map { it.toDomainModel() }
+                                )
+                                Log.i(TAG, "UsageStats reconciled successfully for closed session: $closedId")
+                            }
+                        } catch (reconcileErr: Exception) {
+                            Log.e(TAG, "Failed to reconcile usage stats on screen off", reconcileErr)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling screen off in service", e)
@@ -344,7 +371,7 @@ class GateGuardService : Service() {
     private var lastLaunchTime = 0L
 
     /**
-     * 底层硬件状态巡检哨兵（PowerManager 动态轮询，每 350ms 校验一次物理亮屏与锁屏状态）
+     * 底层硬件状态巡检哨兵（PowerManager 动态轮询，放宽至 1200ms 作为看门狗兜底，减少高频耗电）
      * 彻底解决国产系统（HyperOS Greezer）冻结后台广播导致无法接收 USER_PRESENT / SCREEN_OFF 的问题！
      */
     private fun startInteractiveSentinel() {
@@ -355,7 +382,7 @@ class GateGuardService : Service() {
             var lastWasInteractive = pm?.isInteractive ?: true
 
             while (isActive) {
-                delay(350)
+                delay(1200) // 依据规范 7：放宽至 1200ms
                 if (!isTipEnabled || pm == null || km == null) continue
 
                 val currentInteractive = pm.isInteractive
@@ -497,7 +524,7 @@ class GateGuardService : Service() {
         guardWatcherJob?.cancel()
         guardWatcherJob = serviceScope.launch {
             while (isActive && isTipEnabled && !isSessionUnlocked) {
-                delay(300)
+                delay(1200) // 依据规范 7：调整为 1200ms 作为 watchdog 守护，显著降低高频轮询耗电
                 if (isTipEnabled && !isSessionUnlocked && !GateActivity.isGateForeground) {
                     // 若处于白名单应用启动过渡保护期，暂不强弹拉回
                     if (isWhitelistedAppLaunching()) {
@@ -543,35 +570,18 @@ class GateGuardService : Service() {
         }
     }
 
-    private suspend fun ensureActiveSession() {
-        try {
-            val control = database.tipControlDao().getControl() ?: return
-            val openSession = database.sessionDao().getOpenSession()
-            val canonicalId = if (openSession != null) {
-                openSession.id
-            } else {
-                val now = System.currentTimeMillis()
-                val newId = UUID.randomUUID().toString()
-                val newSession = SessionEntity(
-                    id = newId,
-                    bootId = "boot-$now",
-                    startWallMs = now,
-                    status = SessionStatus.OPEN.name
-                )
-                val initialSegment = SessionSegmentEntity(
-                    id = UUID.randomUUID().toString(),
-                    sessionId = newId,
-                    kind = SegmentKind.RESTRICTED.name,
-                    startWallMs = now
-                )
-                database.sessionDao().getOrCreateCanonicalOpenSession(newSession, initialSegment)
-            }
-            if (control.activeSessionId != canonicalId || control.state != SessionState.RESTRICTED.name) {
-                database.tipControlDao().updateEnabled(true, SessionState.RESTRICTED.name)
-                database.tipControlDao().updateActiveSessionId(canonicalId)
-            }
+    private suspend fun ensureActiveSession(): String {
+        return try {
+            val now = System.currentTimeMillis()
+            val elapsed = SystemClock.elapsedRealtime()
+            database.sessionDao().getOrCreateRestrictedSession(
+                bootId = "boot-$now",
+                timestamp = now,
+                elapsedMs = elapsed
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error ensuring active session", e)
+            ""
         }
     }
 
@@ -632,13 +642,36 @@ class GateGuardService : Service() {
         focusTimerJob?.cancel()
 
         val nowElapsed = SystemClock.elapsedRealtime()
+        val nowWall = System.currentTimeMillis()
         val totalSec = targetDurationMinutes * 60
         timerDeadlineElapsedMs = nowElapsed + (totalSec * 1000L)
-        timerDeadlineWallMs = System.currentTimeMillis() + (totalSec * 1000L)
+        timerDeadlineWallMs = nowWall + (totalSec * 1000L)
         currentTimerIntentText = intentText
         currentTimerRemainingSeconds = totalSec
         currentTimerTotalSeconds = totalSec
         hasTriggeredTimeoutAlert = false
+
+        // 依据规范 5：持久化倒计时状态到 focus_timer 表
+        serviceScope.launch {
+            try {
+                val control = database.tipControlDao().getControl()
+                database.focusTimerDao().upsertTimer(
+                    FocusTimerEntity(
+                        singletonId = 1,
+                        sessionId = control?.activeSessionId,
+                        timerStartedWallMs = nowWall,
+                        timerStartedElapsedMs = nowElapsed,
+                        timerDeadlineWallMs = timerDeadlineWallMs,
+                        timerDeadlineElapsedMs = timerDeadlineElapsedMs,
+                        timerTotalSeconds = totalSec,
+                        timerIntentText = intentText,
+                        timerStatus = "RUNNING"
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to persist focus timer start", e)
+            }
+        }
 
         floatingTimer.show(
             intentText = intentText,
@@ -652,6 +685,64 @@ class GateGuardService : Service() {
             }
         )
 
+        startTimerTicker()
+    }
+
+    fun extendFocusTimer(additionalMinutes: Int) {
+        val extraSec = additionalMinutes * 60
+        val extraMs = extraSec * 1000L
+        timerDeadlineElapsedMs += extraMs
+        timerDeadlineWallMs += extraMs
+        currentTimerTotalSeconds += extraSec
+        val now = SystemClock.elapsedRealtime()
+        val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
+        currentTimerRemainingSeconds = remainingSec
+        if (remainingSec > 0) {
+            hasTriggeredTimeoutAlert = false
+        }
+        floatingTimer.updateTime(remainingSec, remainingSec <= 0)
+        updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, remainingSec <= 0)
+
+        // 依据规范 5：持久化 extend 延长时间
+        serviceScope.launch {
+            try {
+                val existing = database.focusTimerDao().getTimer()
+                if (existing != null) {
+                    database.focusTimerDao().upsertTimer(
+                        existing.copy(
+                            timerDeadlineWallMs = timerDeadlineWallMs,
+                            timerDeadlineElapsedMs = timerDeadlineElapsedMs,
+                            timerTotalSeconds = currentTimerTotalSeconds,
+                            timerStatus = "RUNNING"
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to persist focus timer extension", e)
+            }
+        }
+    }
+
+    fun stopFocusTimer() {
+        focusTimerJob?.cancel()
+        focusTimerJob = null
+        floatingTimer.hide()
+        startAsForeground()
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.cancel(ALERT_NOTIFICATION_ID)
+
+        // 依据规范 5：持久化 stop 状态
+        serviceScope.launch {
+            try {
+                database.focusTimerDao().updateTimerStatus("STOPPED")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to mark timer stopped", e)
+            }
+        }
+    }
+
+    private fun startTimerTicker() {
+        focusTimerJob?.cancel()
         focusTimerJob = serviceScope.launch {
             while (isActive && isSessionUnlocked) {
                 val now = SystemClock.elapsedRealtime()
@@ -671,29 +762,63 @@ class GateGuardService : Service() {
         }
     }
 
-    fun extendFocusTimer(additionalMinutes: Int) {
-        val extraSec = additionalMinutes * 60
-        val extraMs = extraSec * 1000L
-        timerDeadlineElapsedMs += extraMs
-        timerDeadlineWallMs += extraMs
-        currentTimerTotalSeconds += extraSec
-        val now = SystemClock.elapsedRealtime()
-        val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
-        currentTimerRemainingSeconds = remainingSec
-        if (remainingSec > 0) {
-            hasTriggeredTimeoutAlert = false
-        }
-        floatingTimer.updateTime(remainingSec, remainingSec <= 0)
-        updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, remainingSec <= 0)
-    }
+    /**
+     * 依据规范 5：从数据库恢复倒计时（支持进程杀掉恢复、同一次 boot 优先 elapsedRealtime，跨 boot 使用 wall clock）
+     */
+    private fun restoreFocusTimerIfActive() {
+        serviceScope.launch {
+            try {
+                val timer = database.focusTimerDao().getTimer() ?: return@launch
+                if (timer.timerStatus != "RUNNING") return@launch
 
-    fun stopFocusTimer() {
-        focusTimerJob?.cancel()
-        focusTimerJob = null
-        floatingTimer.hide()
-        startAsForeground()
-        val nm = getSystemService(NotificationManager::class.java)
-        nm?.cancel(ALERT_NOTIFICATION_ID)
+                val control = database.tipControlDao().getControl()
+                if (control == null || !control.enabled || control.state != SessionState.FULL.name) {
+                    database.focusTimerDao().updateTimerStatus("STOPPED")
+                    return@launch
+                }
+
+                val nowElapsed = SystemClock.elapsedRealtime()
+                val nowWall = System.currentTimeMillis()
+
+                // 判断是否同一次开机
+                val isSameBoot = (nowElapsed >= timer.timerStartedElapsedMs)
+                val remainingSec = if (isSameBoot) {
+                    ((timer.timerDeadlineElapsedMs - nowElapsed) / 1000L).toInt()
+                } else {
+                    ((timer.timerDeadlineWallMs - nowWall) / 1000L).toInt()
+                }
+
+                if (remainingSec > 0) {
+                    Log.i(TAG, "Restoring focus timer from DB: remaining=${remainingSec}s, isSameBoot=$isSameBoot")
+                    timerDeadlineElapsedMs = if (isSameBoot) timer.timerDeadlineElapsedMs else (nowElapsed + remainingSec * 1000L)
+                    timerDeadlineWallMs = timer.timerDeadlineWallMs
+                    currentTimerTotalSeconds = timer.timerTotalSeconds
+                    currentTimerIntentText = timer.timerIntentText
+                    currentTimerRemainingSeconds = remainingSec
+                    isSessionUnlocked = true
+
+                    withContext(Dispatchers.Main) {
+                        floatingTimer.show(
+                            intentText = timer.timerIntentText,
+                            targetDurationMinutes = (timer.timerTotalSeconds / 60).coerceAtLeast(1),
+                            onLock = {
+                                stopFocusTimer()
+                                forceLaunchGateActivity()
+                            },
+                            onExtend = {
+                                extendFocusTimer(1)
+                            }
+                        )
+                    }
+                    startTimerTicker()
+                } else {
+                    Log.i(TAG, "Persisted timer expired while inactive")
+                    database.focusTimerDao().updateTimerStatus("STOPPED")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restore focus timer", e)
+            }
+        }
     }
 
     private fun triggerTimeoutAlert(intentText: String, targetMinutes: Int) {

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -605,22 +606,12 @@ class ManagementActivity : ComponentActivity() {
             }
             database.whitelistDao().replaceWhitelist(entries, 1L, now)
 
-            val sessionId = UUID.randomUUID().toString()
-            val session = com.openingtip.core.database.entity.SessionEntity(
-                id = sessionId,
+            val elapsed = SystemClock.elapsedRealtime()
+            val canonicalSessionId = database.sessionDao().getOrCreateRestrictedSession(
                 bootId = "boot-$now",
-                startWallMs = now,
-                status = SessionStatus.OPEN.name
+                timestamp = now,
+                elapsedMs = elapsed
             )
-            val segment = com.openingtip.core.database.entity.SessionSegmentEntity(
-                id = UUID.randomUUID().toString(),
-                sessionId = sessionId,
-                kind = SegmentKind.RESTRICTED.name,
-                startWallMs = now,
-                whitelistRevision = 1L
-            )
-
-            database.sessionDao().createSessionIfAbsent(session, segment)
             database.tipControlDao().upsertControl(
                 TipControlEntity(
                     singletonId = 1,
@@ -628,7 +619,7 @@ class ManagementActivity : ComponentActivity() {
                     whitelistConfirmed = true,
                     enabled = true,
                     state = SessionState.RESTRICTED.name,
-                    activeSessionId = sessionId
+                    activeSessionId = canonicalSessionId
                 )
             )
 
@@ -683,23 +674,14 @@ class ManagementActivity : ComponentActivity() {
     private fun enableTipModeExisting() {
         lifecycleScope.launch(Dispatchers.IO) {
             val now = System.currentTimeMillis()
-            val sessionId = UUID.randomUUID().toString()
-            val session = com.openingtip.core.database.entity.SessionEntity(
-                id = sessionId,
+            val elapsed = SystemClock.elapsedRealtime()
+            val canonicalSessionId = database.sessionDao().getOrCreateRestrictedSession(
                 bootId = "boot-$now",
-                startWallMs = now,
-                status = SessionStatus.OPEN.name
+                timestamp = now,
+                elapsedMs = elapsed
             )
-            val segment = com.openingtip.core.database.entity.SessionSegmentEntity(
-                id = UUID.randomUUID().toString(),
-                sessionId = sessionId,
-                kind = SegmentKind.RESTRICTED.name,
-                startWallMs = now,
-                whitelistRevision = 1L
-            )
-            database.sessionDao().createSessionIfAbsent(session, segment)
             database.tipControlDao().updateEnabled(true, SessionState.RESTRICTED.name)
-            database.tipControlDao().updateActiveSessionId(sessionId)
+            database.tipControlDao().updateActiveSessionId(canonicalSessionId)
 
             // 启动前台守护服务
             GateGuardService.startService(this@ManagementActivity)
@@ -715,9 +697,8 @@ class ManagementActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val control = database.tipControlDao().getControl()
             val now = System.currentTimeMillis()
-            control?.activeSessionId?.let { id ->
-                database.sessionDao().closeSessionIfOpen(id, now, null, SessionEndReason.USER_MANUAL.name)
-            }
+            val activeId = control?.activeSessionId ?: ""
+            val closedId = database.sessionDao().closeSessionIfOpen(activeId, now, null, SessionEndReason.USER_MANUAL.name)
             database.tipControlDao().updateEnabled(false, SessionState.DISARMED.name)
             database.tipControlDao().updateActiveSessionId(null)
 
