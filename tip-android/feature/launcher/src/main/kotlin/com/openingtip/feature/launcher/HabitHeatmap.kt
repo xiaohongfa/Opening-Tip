@@ -46,7 +46,9 @@ data class HeatmapDay(
 fun HabitHeatmap(
     todo: TodoItem,
     modifier: Modifier = Modifier,
-    numWeeks: Int = 10
+    numWeeks: Int = 10,
+    onCheckInDate: ((todoId: String, timestamp: Long) -> Unit)? = null,
+    onUndoCheckInDate: ((todoId: String, dateKey: String) -> Unit)? = null
 ) {
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val displayFormat = remember { SimpleDateFormat("M月d日 EEEE", Locale.CHINESE) }
@@ -72,7 +74,10 @@ fun HabitHeatmap(
         generateHeatmapGrid(numWeeks, dayCounts, dayFormat, displayFormat, monthFormat)
     }
 
-    var selectedDay by remember { mutableStateOf<HeatmapDay?>(null) }
+    var selectedDateKey by remember { mutableStateOf<String?>(null) }
+    val selectedDay = remember(weeks, selectedDateKey) {
+        selectedDateKey?.let { key -> weeks.flatten().find { it.dateKey == key } }
+    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -220,10 +225,10 @@ fun HabitHeatmap(
                                 week.forEach { day ->
                                     HeatmapCell(
                                         day = day,
-                                        isSelected = selectedDay?.dateKey == day.dateKey,
+                                        isSelected = selectedDateKey == day.dateKey,
                                         onClick = {
                                             if (!day.isFuture) {
-                                                selectedDay = if (selectedDay?.dateKey == day.dateKey) null else day
+                                                selectedDateKey = if (selectedDateKey == day.dateKey) null else day.dateKey
                                             }
                                         }
                                     )
@@ -236,27 +241,97 @@ fun HabitHeatmap(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 底部：图例与点击交互详情
+            // 底部：选定日期的打卡与补打卡操作面板
+            if (selectedDay != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "${selectedDay.displayDate} · 已打卡 ${selectedDay.count} 次",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (selectedDay.isToday) "今日打卡" else "历史补打卡",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (selectedDay.count > 0 && onUndoCheckInDate != null) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        onUndoCheckInDate(todo.id, selectedDay.dateKey)
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(26.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    )
+                                ) {
+                                    Text("撤销1次", fontSize = 10.sp)
+                                }
+                            }
+
+                            if (onCheckInDate != null) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val cal = Calendar.getInstance()
+                                        val targetCal = Calendar.getInstance().apply {
+                                            time = dayFormat.parse(selectedDay.dateKey) ?: Date()
+                                            if (selectedDay.isToday) {
+                                                timeInMillis = System.currentTimeMillis()
+                                            } else {
+                                                set(Calendar.HOUR_OF_DAY, cal.get(Calendar.HOUR_OF_DAY))
+                                                set(Calendar.MINUTE, cal.get(Calendar.MINUTE))
+                                                set(Calendar.SECOND, cal.get(Calendar.SECOND))
+                                            }
+                                        }
+                                        onCheckInDate(todo.id, targetCal.timeInMillis)
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(26.dp),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = if (selectedDay.isToday) "+ 今日打卡" else "+ 补打卡",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 提示与颜色图例
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 点击详情展示
-                if (selectedDay != null) {
-                    Text(
-                        text = "${selectedDay!!.displayDate}：打卡 ${selectedDay!!.count} 次",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                } else {
-                    Text(
-                        text = "点击格子可查看具体打卡频次",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
+                Text(
+                    text = if (selectedDay != null) "点击方块可切换日期或再次点击取消" else "点击热力方格可选中历史日期进行补卡",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
 
                 // 颜色图例
                 Row(

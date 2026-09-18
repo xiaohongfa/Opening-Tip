@@ -40,6 +40,7 @@ data class TodoItem(
     fun appendCompletion(timestamp: Long = System.currentTimeMillis()): Pair<Int, String> {
         val list = getCompletionTimestamps().toMutableList()
         list.add(timestamp)
+        list.sort()
         val count = (completedCount + 1).coerceAtLeast(list.size)
         val json = "[" + list.joinToString(",") + "]"
         return Pair(count, json)
@@ -49,6 +50,18 @@ data class TodoItem(
         val list = getCompletionTimestamps().toMutableList()
         if (list.isNotEmpty()) {
             list.removeAt(list.size - 1)
+        }
+        val count = (completedCount - 1).coerceAtLeast(0)
+        val json = "[" + list.joinToString(",") + "]"
+        return Pair(count, json)
+    }
+
+    fun undoCompletionOnDate(dateKey: String): Pair<Int, String> {
+        val list = getCompletionTimestamps().toMutableList()
+        val dayFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val indexToRemove = list.indexOfLast { dayFormat.format(java.util.Date(it)) == dateKey }
+        if (indexToRemove >= 0) {
+            list.removeAt(indexToRemove)
         }
         val count = (completedCount - 1).coerceAtLeast(0)
         val json = "[" + list.joinToString(",") + "]"

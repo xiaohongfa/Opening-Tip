@@ -333,6 +333,8 @@ class ManagementActivity : ComponentActivity() {
                     onAddTodo = { title, type, targetTime -> handleAddTodo(title, type, targetTime) },
                     onIncrementPermanent = { id -> handleIncrementPermanent(id) },
                     onUndoPermanent = { id -> handleUndoPermanent(id) },
+                    onCheckInPermanentDate = { id, ts -> handleIncrementPermanent(id, ts) },
+                    onUndoPermanentDate = { id, dateKey -> handleUndoPermanentDate(id, dateKey) },
                     onDeleteTodo = { id -> handleDeleteTodo(id) },
                     onClearCompletedShortTerm = { handleClearCompletedShortTerm() },
                     onBack = { finish() },
@@ -731,7 +733,7 @@ class ManagementActivity : ComponentActivity() {
         }
     }
 
-    private fun handleIncrementPermanent(id: String) {
+    private fun handleIncrementPermanent(id: String, timestamp: Long = System.currentTimeMillis()) {
         lifecycleScope.launch(Dispatchers.IO) {
             val item = database.todoDao().getTodoById(id) ?: return@launch
             val domain = TodoItem(
@@ -746,12 +748,13 @@ class ManagementActivity : ComponentActivity() {
                 completionRecordsJson = item.completionRecordsJson,
                 sortOrder = item.sortOrder
             )
-            val now = System.currentTimeMillis()
-            val (newCount, newJson) = domain.appendCompletion(now)
+            val (newCount, newJson) = domain.appendCompletion(timestamp)
+            val allTimestamps = domain.getCompletionTimestamps() + timestamp
+            val latestCompletedAt = allTimestamps.maxOrNull()
             database.todoDao().updatePermanentProgress(
                 id = id,
                 completedCount = newCount,
-                completedAt = now,
+                completedAt = latestCompletedAt,
                 completionRecordsJson = newJson,
                 isCompleted = true
             )
@@ -782,6 +785,36 @@ class ManagementActivity : ComponentActivity() {
                 completedAt = lastTime,
                 completionRecordsJson = newJson,
                 isCompleted = newCount > 0
+            )
+        }
+    }
+
+    private fun handleUndoPermanentDate(id: String, dateKey: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val item = database.todoDao().getTodoById(id) ?: return@launch
+            val domain = TodoItem(
+                id = item.id,
+                title = item.title,
+                type = TodoType.valueOf(item.type),
+                isCompleted = item.isCompleted,
+                createdAt = item.createdAt,
+                completedAt = item.completedAt,
+                targetTime = item.targetTime,
+                completedCount = item.completedCount,
+                completionRecordsJson = item.completionRecordsJson,
+                sortOrder = item.sortOrder
+            )
+            val (newCount, newJson) = domain.undoCompletionOnDate(dateKey)
+            val dayFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            val remainingTimestamps = domain.getCompletionTimestamps().filterNot {
+                dayFormat.format(java.util.Date(it)) == dateKey
+            }
+            database.todoDao().updatePermanentProgress(
+                id = id,
+                completedCount = newCount,
+                completedAt = remainingTimestamps.maxOrNull(),
+                completionRecordsJson = newJson,
+                isCompleted = remainingTimestamps.isNotEmpty()
             )
         }
     }

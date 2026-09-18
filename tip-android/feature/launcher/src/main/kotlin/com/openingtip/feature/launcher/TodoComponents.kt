@@ -36,7 +36,9 @@ fun TodoBoard(
     onIncrementPermanent: (String) -> Unit,
     onUndoPermanent: (String) -> Unit,
     onDeleteTodo: (String) -> Unit,
-    onClearCompletedShortTerm: () -> Unit
+    onClearCompletedShortTerm: () -> Unit,
+    onCheckInDate: ((todoId: String, timestamp: Long) -> Unit)? = null,
+    onUndoCheckInDate: ((todoId: String, dateKey: String) -> Unit)? = null
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showClearCompletedDialog by remember { mutableStateOf(false) }
@@ -154,7 +156,9 @@ fun TodoBoard(
                                 onToggle = { isChecked -> onToggleTodo(todo.id, isChecked) },
                                 onIncrement = { onIncrementPermanent(todo.id) },
                                 onUndo = { onUndoPermanent(todo.id) },
-                                onDelete = { onDeleteTodo(todo.id) }
+                                onDelete = { onDeleteTodo(todo.id) },
+                                onCheckInDate = onCheckInDate,
+                                onUndoCheckInDate = onUndoCheckInDate
                             )
                         }
                     }
@@ -215,7 +219,9 @@ fun TodoRowItem(
     onToggle: (Boolean) -> Unit,
     onIncrement: () -> Unit,
     onUndo: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onCheckInDate: ((todoId: String, timestamp: Long) -> Unit)? = null,
+    onUndoCheckInDate: ((todoId: String, dateKey: String) -> Unit)? = null
 ) {
     var isHeatmapExpanded by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -350,7 +356,11 @@ fun TodoRowItem(
                 // 展开的热力图
                 AnimatedVisibility(visible = isHeatmapExpanded) {
                     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        HabitHeatmap(todo = todo)
+                        HabitHeatmap(
+                            todo = todo,
+                            onCheckInDate = onCheckInDate,
+                            onUndoCheckInDate = onUndoCheckInDate
+                        )
                     }
                 }
             } else {

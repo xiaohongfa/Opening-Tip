@@ -43,6 +43,8 @@ fun ManagementScreen(
     onAddTodo: (String, TodoType, String?) -> Unit = { _, _, _ -> },
     onIncrementPermanent: (String) -> Unit = {},
     onUndoPermanent: (String) -> Unit = {},
+    onCheckInPermanentDate: (String, Long) -> Unit = { _, _ -> },
+    onUndoPermanentDate: (String, String) -> Unit = { _, _ -> },
     onDeleteTodo: (String) -> Unit = {},
     onClearCompletedShortTerm: () -> Unit = {},
     onBack: () -> Unit,
@@ -155,7 +157,9 @@ fun ManagementScreen(
                             onIncrementPermanent = onIncrementPermanent,
                             onUndoPermanent = onUndoPermanent,
                             onDeleteTodo = onDeleteTodo,
-                            onClearCompletedShortTerm = onClearCompletedShortTerm
+                            onClearCompletedShortTerm = onClearCompletedShortTerm,
+                            onCheckInDate = onCheckInPermanentDate,
+                            onUndoCheckInDate = onUndoPermanentDate
                         )
                     }
                 }
@@ -164,7 +168,9 @@ fun ManagementScreen(
                     sessions = sessions,
                     todos = todos,
                     onExportData = onExportData,
-                    onClearClick = { showClearConfirm = true }
+                    onClearClick = { showClearConfirm = true },
+                    onCheckInPermanentDate = onCheckInPermanentDate,
+                    onUndoPermanentDate = onUndoPermanentDate
                 )
                 3 -> SystemStatusTab(
                     isEnabled = isEnabled,
@@ -272,7 +278,9 @@ private fun HistoryTab(
     sessions: List<Session>,
     todos: List<TodoItem>,
     onExportData: () -> Unit,
-    onClearClick: () -> Unit
+    onClearClick: () -> Unit,
+    onCheckInPermanentDate: (String, Long) -> Unit = { _, _ -> },
+    onUndoPermanentDate: (String, String) -> Unit = { _, _ -> }
 ) {
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
@@ -393,7 +401,11 @@ private fun HistoryTab(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(habits, key = { it.id }) { habit ->
-                        HabitHeatmap(todo = habit)
+                        HabitHeatmap(
+                            todo = habit,
+                            onCheckInDate = onCheckInPermanentDate,
+                            onUndoCheckInDate = onUndoPermanentDate
+                        )
                     }
                 }
             }
