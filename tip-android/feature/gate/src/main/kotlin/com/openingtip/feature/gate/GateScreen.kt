@@ -90,6 +90,7 @@ fun GateScreen(
     historySessions: List<SessionHistoryItem> = emptyList(),
     todayUnlockCount: Int = 0,
     todayUsageDurationMs: Long = 0L,
+    todayPassiveDurationMs: Long = 0L,
     onImportLocalAudio: (() -> Unit)? = null,
     onFilePickerActiveChanged: ((Boolean) -> Unit)? = null,
     onToggleTodo: (String, Boolean) -> Unit = { _, _ -> },
@@ -183,6 +184,7 @@ fun GateScreen(
             HeaderSection(
                 todayUnlockCount = todayUnlockCount,
                 todayUsageDurationMs = todayUsageDurationMs,
+                todayPassiveDurationMs = todayPassiveDurationMs,
                 pinnedCountdown = pinnedCountdown,
                 onOpenHistory = { showHistoryDialog = true },
                 onOpenCountdown = { showCountdownDialog = true }
@@ -278,6 +280,7 @@ fun GateScreen(
 private fun HeaderSection(
     todayUnlockCount: Int,
     todayUsageDurationMs: Long,
+    todayPassiveDurationMs: Long,
     pinnedCountdown: CountdownItem,
     onOpenHistory: () -> Unit,
     onOpenCountdown: () -> Unit
@@ -404,6 +407,62 @@ private fun HeaderSection(
                         )
                     }
                 }
+            }
+        }
+
+        // 践行自律：每日被动屏幕时间进度条卡片（建议 ≤ 1.5小时）
+        val isExceeded = todayPassiveDurationMs > PassiveTimeManager.TARGET_DAILY_PASSIVE_MS
+        val remainingMs = PassiveTimeManager.TARGET_DAILY_PASSIVE_MS - todayPassiveDurationMs
+        val passiveProgress = (todayPassiveDurationMs.toFloat() / PassiveTimeManager.TARGET_DAILY_PASSIVE_MS.toFloat()).coerceIn(0f, 1f)
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = if (isExceeded) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            }
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (isExceeded) "⚠️ 📺" else "📺", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "今日被动屏幕时间 (建议≤1.5h)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Text(
+                        text = if (isExceeded) {
+                            "已用 ${PassiveTimeManager.formatDurationReadable(todayPassiveDurationMs)} (超标!)"
+                        } else {
+                            "${PassiveTimeManager.formatDurationReadable(todayPassiveDurationMs)} / 1.5h (剩${PassiveTimeManager.formatDurationReadable(remainingMs)})"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { passiveProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                )
             }
         }
     }

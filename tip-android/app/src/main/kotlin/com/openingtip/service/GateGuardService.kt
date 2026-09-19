@@ -33,6 +33,7 @@ import com.openingtip.core.model.SessionStatus
 import com.openingtip.core.platform.SystemPackageHelper
 import com.openingtip.core.platform.SystemScreenReceiver
 import com.openingtip.data.usage.UsageStatsRepository
+import com.openingtip.feature.gate.PassiveTimeManager
 import com.openingtip.ui.GateActivity
 import com.openingtip.ui.ManagementActivity
 import java.util.*
@@ -149,6 +150,7 @@ class GateGuardService : Service() {
         startObservingControlState()
         registerScreenStateReceiver()
         startInteractiveSentinel()
+        PassiveTimeManager.init(this)
         restoreFocusTimerIfActive()
         Log.i(TAG, "GateGuardService onCreate: 守护服务已全面就绪 (双通道哨兵已激活)")
     }
@@ -312,6 +314,10 @@ class GateGuardService : Service() {
         launchGracePackage = null
         launchGraceExpiresAt = 0L
         guardWatcherJob?.cancel()
+        if (PassiveTimeManager.isPassiveTimingActive()) {
+            PassiveTimeManager.stopPassiveTimer(this)
+            Log.i(TAG, "onDeviceScreenOff: 屏幕熄灭，已自动结算保存被动屏幕时间")
+        }
         stopFocusTimer() // 停止倒计时与悬浮窗！
 
         serviceScope.launch {
@@ -653,44 +659,59 @@ class GateGuardService : Service() {
      * 开启专注倒计时器（悬浮灵动胶囊 + 通知栏进度条 + 超时多重强提醒）
      */
     fun startFocusTimer(intentText: String, targetDurationMinutes: Int) {
-        if (targetDurationMinutes <= 0) return
+        startFloatingAssistant(intentText, targetDurationMinutes)
+    }
+
+    /**
+     * 开启桌面悬浮助手（支持纯被动时间模式与专注倒计时模式）
+     */
+    fun startFloatingAssistant(intentText: String, targetDurationMinutes: Int) {
         focusTimerJob?.cancel()
 
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val nowWall = System.currentTimeMillis()
-        val totalSec = targetDurationMinutes * 60
-        timerDeadlineElapsedMs = nowElapsed + (totalSec * 1000L)
-        timerDeadlineWallMs = nowWall + (totalSec * 1000L)
-        currentTimerIntentText = intentText
-        currentTimerRemainingSeconds = totalSec
-        currentTimerTotalSeconds = totalSec
-        hasTriggeredTimeoutAlert = false
+        if (targetDurationMinutes > 0) {
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val nowWall = System.currentTimeMillis()
+            val totalSec = targetDurationMinutes * 60
+            timerDeadlineElapsedMs = nowElapsed + (totalSec * 1000L)
+            timerDeadlineWallMs = nowWall + (totalSec * 1000L)
+            currentTimerIntentText = intentText
+            currentTimerRemainingSeconds = totalSec
+            currentTimerTotalSeconds = totalSec
+            hasTriggeredTimeoutAlert = false
 
-        // 依据规范 5：持久化倒计时状态到 focus_timer 表
-        serviceScope.launch {
-            try {
-                val control = database.tipControlDao().getControl()
-                database.focusTimerDao().upsertTimer(
-                    FocusTimerEntity(
-                        singletonId = 1,
-                        sessionId = control?.activeSessionId,
-                        timerStartedWallMs = nowWall,
-                        timerStartedElapsedMs = nowElapsed,
-                        timerDeadlineWallMs = timerDeadlineWallMs,
-                        timerDeadlineElapsedMs = timerDeadlineElapsedMs,
-                        timerTotalSeconds = totalSec,
-                        timerIntentText = intentText,
-                        timerStatus = "RUNNING"
+            // 依据规范 5：持久化倒计时状态到 focus_timer 表
+            serviceScope.launch {
+                try {
+                    val control = database.tipControlDao().getControl()
+                    database.focusTimerDao().upsertTimer(
+                        FocusTimerEntity(
+                            singletonId = 1,
+                            sessionId = control?.activeSessionId,
+                            timerStartedWallMs = nowWall,
+                            timerStartedElapsedMs = nowElapsed,
+                            timerDeadlineWallMs = timerDeadlineWallMs,
+                            timerDeadlineElapsedMs = timerDeadlineElapsedMs,
+                            timerTotalSeconds = totalSec,
+                            timerIntentText = intentText,
+                            timerStatus = "RUNNING"
+                        )
                     )
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to persist focus timer start", e)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to persist focus timer start", e)
+                }
             }
+        } else {
+            timerDeadlineElapsedMs = 0L
+            timerDeadlineWallMs = 0L
+            currentTimerIntentText = intentText
+            currentTimerRemainingSeconds = 0
+            currentTimerTotalSeconds = 0
+            hasTriggeredTimeoutAlert = false
         }
 
         floatingTimer.show(
             intentText = intentText,
-            targetDurationMinutes = targetDurationMinutes,
+            targetDurationMinutes = targetDurationMinutes.coerceAtLeast(0),
             onLock = {
                 stopFocusTimer()
                 forceLaunchGateActivity()
@@ -761,15 +782,20 @@ class GateGuardService : Service() {
         focusTimerJob = serviceScope.launch {
             while (isActive && isSessionUnlocked) {
                 val now = SystemClock.elapsedRealtime()
-                val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
-                currentTimerRemainingSeconds = remainingSec
-                val isTimeout = remainingSec <= 0
-                floatingTimer.updateTime(remainingSec, isTimeout)
-                updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, isTimeout)
+                if (currentTimerTotalSeconds > 0) {
+                    val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
+                    currentTimerRemainingSeconds = remainingSec
+                    val isTimeout = remainingSec <= 0
+                    floatingTimer.updateTime(remainingSec, isTimeout)
+                    updateTimerNotification(currentTimerIntentText, remainingSec, currentTimerTotalSeconds, isTimeout)
 
-                if (remainingSec <= 0 && !hasTriggeredTimeoutAlert) {
-                    hasTriggeredTimeoutAlert = true
-                    triggerTimeoutAlert(currentTimerIntentText, (currentTimerTotalSeconds / 60).coerceAtLeast(1))
+                    if (remainingSec <= 0 && !hasTriggeredTimeoutAlert) {
+                        hasTriggeredTimeoutAlert = true
+                        triggerTimeoutAlert(currentTimerIntentText, (currentTimerTotalSeconds / 60).coerceAtLeast(1))
+                    }
+                } else {
+                    // 纯被动计时/常驻悬浮胶囊更新
+                    floatingTimer.updateTime(0, false)
                 }
 
                 delay(1000)

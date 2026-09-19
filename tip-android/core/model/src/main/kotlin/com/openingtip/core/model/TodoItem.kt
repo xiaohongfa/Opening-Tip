@@ -62,9 +62,10 @@ data class TodoItem(
         val indexToRemove = list.indexOfLast { dayFormat.format(java.util.Date(it)) == dateKey }
         if (indexToRemove >= 0) {
             list.removeAt(indexToRemove)
+            val count = (completedCount - 1).coerceAtLeast(0)
+            val json = "[" + list.joinToString(",") + "]"
+            return Pair(count, json)
         }
-        val count = (completedCount - 1).coerceAtLeast(0)
-        val json = "[" + list.joinToString(",") + "]"
-        return Pair(count, json)
+        return Pair(completedCount, completionRecordsJson)
     }
 }

@@ -31,6 +31,7 @@ import com.openingtip.data.usage.UsageStatsRepository
 import com.openingtip.feature.gate.GateAppUsageItem
 import com.openingtip.feature.gate.GateSessionSummary
 import com.openingtip.feature.gate.GateScreen
+import com.openingtip.feature.gate.PassiveTimeManager
 import com.openingtip.feature.gate.SessionHistoryItem
 import com.openingtip.feature.gate.WhitelistAppItem
 import com.openingtip.service.GateGuardService
@@ -122,6 +123,19 @@ class GateActivity : ComponentActivity() {
                     }
                     val todayUnlockCount by database.sessionDao().observeTodaySessionCount(startOfDayMs).collectAsState(initial = 0)
                     val todayUsageDurationMs by database.sessionDao().observeTodayTotalDuration(startOfDayMs).collectAsState(initial = 0L)
+
+                    var todayPassiveDurationMs by remember {
+                        mutableLongStateOf(PassiveTimeManager.getTodayTotalPassiveMs(this@GateActivity))
+                    }
+                    DisposableEffect(Unit) {
+                        val listener = { _: Boolean, totalMs: Long ->
+                            todayPassiveDurationMs = totalMs
+                        }
+                        PassiveTimeManager.addListener(listener)
+                        onDispose {
+                            PassiveTimeManager.removeListener(listener)
+                        }
+                    }
 
                     val historySessionItems = remember(allSessions, allAppSummaries) {
                         val summariesBySession = allAppSummaries.groupBy { it.sessionId }
@@ -230,6 +244,7 @@ class GateActivity : ComponentActivity() {
                         historySessions = historySessionItems,
                         todayUnlockCount = todayUnlockCount,
                         todayUsageDurationMs = todayUsageDurationMs,
+                        todayPassiveDurationMs = todayPassiveDurationMs,
                         onToggleTodo = { id, isCompleted -> handleToggleTodo(id, isCompleted) },
                         onAddTodo = { title, type, targetTime -> handleAddTodo(title, type, targetTime) },
                         onIncrementPermanent = { id -> handleIncrementPermanent(id) },
@@ -424,11 +439,13 @@ class GateActivity : ComponentActivity() {
                     return@launch
                 }
 
-                // 数据库事务完全成功后，才标记放行并启动倒计时
+                // 数据库事务完全成功后，才标记放行并启动倒计时/桌面悬浮助手
                 isIntentSubmitted = true
                 GateGuardService.markSessionUnlocked()
                 if (targetDurationMinutes != null && targetDurationMinutes > 0) {
                     GateGuardService.instance?.startFocusTimer(input.trim(), targetDurationMinutes)
+                } else {
+                    GateGuardService.instance?.startFloatingAssistant(input.trim(), 0)
                 }
                 withContext(Dispatchers.Main) {
                     val durationHint = targetDurationMinutes?.let { " (预计 ${it}分钟)" } ?: ""
@@ -443,6 +460,7 @@ class GateActivity : ComponentActivity() {
         try {
             isLaunchingWhitelistApp = true
             GateGuardService.instance?.notifyWhitelistedAppLaunch(pkg)
+            GateGuardService.instance?.startFloatingAssistant("", 0)
             val launchIntent = getAppLaunchIntent(pkg)
             if (launchIntent != null) {
                 launchIntent.addFlags(
