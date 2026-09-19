@@ -91,6 +91,7 @@ fun GateScreen(
     todayUnlockCount: Int = 0,
     todayUsageDurationMs: Long = 0L,
     onImportLocalAudio: (() -> Unit)? = null,
+    onFilePickerActiveChanged: ((Boolean) -> Unit)? = null,
     onToggleTodo: (String, Boolean) -> Unit = { _, _ -> },
     onAddTodo: (String, TodoType, String?) -> Unit = { _, _, _ -> },
     onIncrementPermanent: (String) -> Unit = {},
@@ -118,6 +119,7 @@ fun GateScreen(
     val audioPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
+        onFilePickerActiveChanged?.invoke(false)
         if (uri != null) {
             val fileName = getFileNameFromUri(context, uri)
             val track = TipMusicManager.importLocalAudio(context, uri, fileName)
@@ -256,7 +258,16 @@ fun GateScreen(
             MusicLibraryDialog(
                 onDismiss = { showMusicDialog = false },
                 onImportLocalAudio = {
-                    onImportLocalAudio?.invoke() ?: audioPickerLauncher.launch("audio/*")
+                    onFilePickerActiveChanged?.invoke(true)
+                    if (onImportLocalAudio != null) {
+                        onImportLocalAudio.invoke()
+                    } else {
+                        try {
+                            audioPickerLauncher.launch("audio/*")
+                        } catch (_: Exception) {
+                            onFilePickerActiveChanged?.invoke(false)
+                        }
+                    }
                 }
             )
         }

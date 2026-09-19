@@ -149,7 +149,12 @@ fun ManagementScreen(
 
             when (selectedTab) {
                 0 -> {
-                    Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp)
+                    ) {
                         com.openingtip.feature.launcher.TodoBoard(
                             todos = todos,
                             onToggleTodo = onToggleTodo,

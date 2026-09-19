@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.openingtip.TipApplication
+import com.openingtip.core.platform.SystemPackageHelper
 import com.openingtip.ui.GateActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,12 @@ class TipAccessibilityService : AccessibilityService() {
                 // 如果处于白名单应用启动过渡保护期内，暂不抢弹以确保应用正常冷启动
                 if (guard.isWhitelistedAppLaunching()) {
                     Log.d(TAG, "Ignoring window transition to $pkg during launch grace period")
+                    return
+                }
+
+                // 如果当前正在挑选文件或系统文件管理器在前台，直接放行
+                if (guard.isFilePickerActive() || SystemPackageHelper.isFilePickerPackage(this, pkg)) {
+                    Log.d(TAG, "Ignoring window transition to file picker: $pkg")
                     return
                 }
 

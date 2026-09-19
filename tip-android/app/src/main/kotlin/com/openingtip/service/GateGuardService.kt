@@ -94,8 +94,21 @@ class GateGuardService : Service() {
         return now < launchGraceExpiresAt
     }
 
+    @Volatile
+    private var isFilePickerActive: Boolean = false
+
     /**
-     * 判断指定包名在未解锁阶段是否合法放行（白名单应用、已启用输入法、系统基础框架UI、权限与来电界面等）
+     * 当门禁界面拉起文件选择器导入音乐时通知守护服务
+     */
+    fun notifyFilePickerActive(active: Boolean) {
+        isFilePickerActive = active
+        Log.i(TAG, "File picker active state changed: $active")
+    }
+
+    fun isFilePickerActive(): Boolean = isFilePickerActive
+
+    /**
+     * 判断指定包名在未解锁阶段是否合法放行（白名单应用、已启用输入法、系统基础框架UI、权限与来电界面、系统文件管理器等）
      */
     fun isPackageAllowedWhileLocked(pkg: String): Boolean {
         if (pkg == packageName) return true
@@ -105,6 +118,8 @@ class GateGuardService : Service() {
         if (pkg == launchGracePackage && now < launchGraceExpiresAt) return true
         if (SystemPackageHelper.isSystemAuxiliaryPackage(pkg)) return true
         if (SystemPackageHelper.isInputMethod(this, pkg)) return true
+        if (SystemPackageHelper.isFilePickerPackage(this, pkg)) return true
+        if (isFilePickerActive) return true
         return false
     }
 

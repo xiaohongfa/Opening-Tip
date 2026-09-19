@@ -256,6 +256,10 @@ class GateActivity : ComponentActivity() {
                         onSubmitIntentOrSecret = { input, targetMinutes ->
                             handleGateSubmission(input, targetMinutes, control?.activeSessionId)
                         },
+                        onFilePickerActiveChanged = { active ->
+                            isSelectingFile = active
+                            com.openingtip.service.GateGuardService.instance?.notifyFilePickerActive(active)
+                        },
                         onLaunchWhitelistApp = { pkg ->
                             isLaunchingWhitelistApp = true
                             launchAppPackage(pkg)
@@ -284,8 +288,10 @@ class GateActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)
         isLaunchingWhitelistApp = false
+        isSelectingFile = false
         isIntentSubmitted = false
         isGateForeground = true
+        com.openingtip.service.GateGuardService.instance?.notifyFilePickerActive(false)
         hideSystemBars()
         try {
             val am = getSystemService(android.app.ActivityManager::class.java)
@@ -345,7 +351,7 @@ class GateActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         // 用户尝试底部上滑（回到桌面或切多任务），通知守护服务立即就绪
-        if (!isIntentSubmitted && !isLaunchingWhitelistApp) {
+        if (!isIntentSubmitted && !isLaunchingWhitelistApp && !isSelectingFile) {
             GateGuardService.instance?.forceLaunchGateActivity()
         }
     }
@@ -617,5 +623,7 @@ class GateActivity : ComponentActivity() {
     companion object {
         @Volatile
         var isGateForeground: Boolean = false
+        @Volatile
+        var isSelectingFile: Boolean = false
     }
 }

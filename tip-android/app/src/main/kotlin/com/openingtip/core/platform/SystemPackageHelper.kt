@@ -27,7 +27,9 @@ object SystemPackageHelper {
         "com.miui.securitycenter",
         "com.lbe.security.miui",
         "com.android.documentsui",
+        "com.google.android.documentsui",
         "com.google.android.providers.media.module",
+        "com.android.providers.media.module",
         "com.android.providers.media",
         "com.google.android.gms",
         "com.miui.core",
@@ -37,6 +39,30 @@ object SystemPackageHelper {
         "com.android.incallui",
         "com.android.server.telecom",
         "com.google.android.dialer",
+        // 系统文件管理器与文档选择器（SAF / GetContent / OpenDocument）
+        // 小米 / Redmi (HyperOS / MIUI) 文件管理与文档组件
+        "com.android.fileexplorer",
+        "com.mi.android.globalFileexplorer",
+        "com.miui.fileexplorer",
+        // 华为 / 荣耀 (HarmonyOS / EMUI / MagicOS) 文件管理
+        "com.huawei.filemanager",
+        "com.huawei.hidisk",
+        "com.hihonor.filemanager",
+        // OPPO / 一加 / realme (ColorOS) 文件管理
+        "com.coloros.filemanager",
+        "com.oppo.filemanager",
+        "com.oneplus.filemanager",
+        // vivo / iQOO (OriginOS) 文件管理
+        "com.vivo.filemanager",
+        "com.bbk.filemanager",
+        // 三星 (OneUI) 我的文件
+        "com.sec.android.app.myfiles",
+        "com.samsung.android.app.myfiles",
+        // 魅族 / 联想 / 传音 等系统文件管理
+        "com.meizu.filemanager",
+        "com.lenovo.filemanager",
+        "com.zui.filemanager",
+        "com.transsion.filemanager",
         // 小米 / Redmi (HyperOS / MIUI) 安全键盘与安全核心
         "com.miui.securityinputmethod",
         "com.miui.securitycore",
@@ -159,6 +185,46 @@ object SystemPackageHelper {
             cachedLauncherPackages = launchers
             lastLauncherCacheTime = now
             launchers.contains(pkg)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    @Volatile
+    private var cachedFilePickerPackages: Set<String>? = null
+    @Volatile
+    private var lastFilePickerCacheTime: Long = 0L
+
+    /**
+     * 判断是否为系统文件选择器/文档提供器（用户在门禁中导入本地音乐或文件时放行）
+     */
+    fun isFilePickerPackage(context: Context, pkg: String): Boolean {
+        if (SYSTEM_AUXILIARY_PACKAGES.contains(pkg)) {
+            return true
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        val cached = cachedFilePickerPackages
+        if (cached != null && (now - lastFilePickerCacheTime < 60_000L)) {
+            return cached.contains(pkg)
+        }
+
+        return try {
+            val pm = context.packageManager
+            val getContentResolves = pm.queryIntentActivities(
+                Intent(Intent.ACTION_GET_CONTENT).setType("*/*"),
+                PackageManager.MATCH_DEFAULT_ONLY
+            )
+            val openDocResolves = pm.queryIntentActivities(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),
+                PackageManager.MATCH_DEFAULT_ONLY
+            )
+            val pickers = (getContentResolves + openDocResolves)
+                .mapNotNull { it.activityInfo?.packageName }
+                .toSet()
+            cachedFilePickerPackages = pickers
+            lastFilePickerCacheTime = now
+            pickers.contains(pkg)
         } catch (_: Exception) {
             false
         }
