@@ -24,13 +24,18 @@ object QuickIntentManager {
         return try {
             val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val raw = sp.getString(KEY_PRESETS, null)
-            if (raw.isNullOrBlank()) {
-                DEFAULT_PRESETS
-            } else {
-                raw.split("|||").map { it.trim() }.filter { it.isNotBlank() }
-            }
+            decodePresets(raw)
         } catch (_: Exception) {
             DEFAULT_PRESETS
+        }
+    }
+
+    // null means no saved preference; an empty string means the user removed every tag.
+    internal fun decodePresets(raw: String?): List<String> {
+        return if (raw == null) {
+            DEFAULT_PRESETS
+        } else {
+            raw.split("|||").map { it.trim() }.filter { it.isNotBlank() }
         }
     }
 
