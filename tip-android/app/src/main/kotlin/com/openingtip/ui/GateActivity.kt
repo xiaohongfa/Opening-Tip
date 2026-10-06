@@ -18,6 +18,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.openingtip.TipApplication
 import com.openingtip.core.database.entity.SessionSegmentEntity
@@ -31,11 +33,14 @@ import com.openingtip.data.usage.UsageStatsRepository
 import com.openingtip.feature.gate.GateAppUsageItem
 import com.openingtip.feature.gate.GateSessionSummary
 import com.openingtip.feature.gate.GateScreen
-import com.openingtip.feature.gate.PassiveTimeManager
+import com.openingtip.data.usage.SystemScreenUsageRepository
+import com.openingtip.data.usage.SystemScreenUsageState
 import com.openingtip.feature.gate.SessionHistoryItem
 import com.openingtip.feature.gate.WhitelistAppItem
 import com.openingtip.service.GateGuardService
 import java.util.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +60,7 @@ class GateActivity : ComponentActivity() {
     private val database by lazy { app.database }
     private val secretManager by lazy { SecretManager() }
     private val secretStore by lazy { SecretStore(this, secretManager) }
+    private val systemScreenUsageRepository by lazy { SystemScreenUsageRepository(this) }
     private val usageStatsRepository by lazy { UsageStatsRepository(this, database) }
 
     private var isLaunchingWhitelistApp = false
@@ -113,27 +119,13 @@ class GateActivity : ComponentActivity() {
                     val allSessions by database.sessionDao().observeAllSessions().collectAsState(initial = emptyList())
                     val allAppSummaries by database.usageDao().observeAllAppSummaries().collectAsState(initial = emptyList())
 
-                    val startOfDayMs = remember {
-                        Calendar.getInstance().apply {
-                            set(Calendar.HOUR_OF_DAY, 0)
-                            set(Calendar.MINUTE, 0)
-                            set(Calendar.SECOND, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }.timeInMillis
-                    }
-                    val todayUnlockCount by database.sessionDao().observeTodaySessionCount(startOfDayMs).collectAsState(initial = 0)
-                    val todayUsageDurationMs by database.sessionDao().observeTodayTotalDuration(startOfDayMs).collectAsState(initial = 0L)
-
-                    var todayPassiveDurationMs by remember {
-                        mutableLongStateOf(PassiveTimeManager.getTodayTotalPassiveMs(this@GateActivity))
-                    }
-                    DisposableEffect(Unit) {
-                        val listener = { _: Boolean, totalMs: Long ->
-                            todayPassiveDurationMs = totalMs
-                        }
-                        PassiveTimeManager.addListener(listener)
-                        onDispose {
-                            PassiveTimeManager.removeListener(listener)
+                    var screenUsage by remember { mutableStateOf(SystemScreenUsageState()) }
+                    LaunchedEffect(Unit) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            while (isActive) {
+                                screenUsage = systemScreenUsageRepository.queryCurrentDay()
+                                delay(15_000L)
+                            }
                         }
                     }
 
@@ -242,9 +234,7 @@ class GateActivity : ComponentActivity() {
                         whitelistApps = whitelistItems,
                         todos = domainTodos,
                         historySessions = historySessionItems,
-                        todayUnlockCount = todayUnlockCount,
-                        todayUsageDurationMs = todayUsageDurationMs,
-                        todayPassiveDurationMs = todayPassiveDurationMs,
+                        screenUsage = screenUsage,
                         onToggleTodo = { id, isCompleted -> handleToggleTodo(id, isCompleted) },
                         onAddTodo = { title, type, targetTime -> handleAddTodo(title, type, targetTime) },
                         onIncrementPermanent = { id -> handleIncrementPermanent(id) },

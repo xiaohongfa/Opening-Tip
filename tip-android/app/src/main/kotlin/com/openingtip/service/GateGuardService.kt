@@ -33,7 +33,6 @@ import com.openingtip.core.model.SessionStatus
 import com.openingtip.core.platform.SystemPackageHelper
 import com.openingtip.core.platform.SystemScreenReceiver
 import com.openingtip.data.usage.UsageStatsRepository
-import com.openingtip.feature.gate.PassiveTimeManager
 import com.openingtip.ui.GateActivity
 import com.openingtip.ui.ManagementActivity
 import java.util.*
@@ -150,7 +149,6 @@ class GateGuardService : Service() {
         startObservingControlState()
         registerScreenStateReceiver()
         startInteractiveSentinel()
-        PassiveTimeManager.init(this)
         restoreFocusTimerIfActive()
         Log.i(TAG, "GateGuardService onCreate: 守护服务已全面就绪 (双通道哨兵已激活)")
     }
@@ -314,10 +312,6 @@ class GateGuardService : Service() {
         launchGracePackage = null
         launchGraceExpiresAt = 0L
         guardWatcherJob?.cancel()
-        if (PassiveTimeManager.isPassiveTimingActive()) {
-            PassiveTimeManager.stopPassiveTimer(this)
-            Log.i(TAG, "onDeviceScreenOff: 屏幕熄灭，已自动结算保存被动屏幕时间")
-        }
         stopFocusTimer() // 停止倒计时与悬浮窗！
 
         serviceScope.launch {
@@ -663,7 +657,7 @@ class GateGuardService : Service() {
     }
 
     /**
-     * 开启桌面悬浮助手（支持纯被动时间模式与专注倒计时模式）
+     * 开启桌面悬浮助手（意图详情与专注倒计时）
      */
     fun startFloatingAssistant(intentText: String, targetDurationMinutes: Int) {
         focusTimerJob?.cancel()
@@ -721,7 +715,7 @@ class GateGuardService : Service() {
             }
         )
 
-        startTimerTicker()
+        if (targetDurationMinutes > 0) startTimerTicker()
     }
 
     fun extendFocusTimer(additionalMinutes: Int) {
@@ -780,7 +774,7 @@ class GateGuardService : Service() {
     private fun startTimerTicker() {
         focusTimerJob?.cancel()
         focusTimerJob = serviceScope.launch {
-            while (isActive && isSessionUnlocked) {
+            while (isActive && isSessionUnlocked && currentTimerTotalSeconds > 0) {
                 val now = SystemClock.elapsedRealtime()
                 if (currentTimerTotalSeconds > 0) {
                     val remainingSec = ((timerDeadlineElapsedMs - now) / 1000L).toInt()
@@ -793,9 +787,6 @@ class GateGuardService : Service() {
                         hasTriggeredTimeoutAlert = true
                         triggerTimeoutAlert(currentTimerIntentText, (currentTimerTotalSeconds / 60).coerceAtLeast(1))
                     }
-                } else {
-                    // 纯被动计时/常驻悬浮胶囊更新
-                    floatingTimer.updateTime(0, false)
                 }
 
                 delay(1000)

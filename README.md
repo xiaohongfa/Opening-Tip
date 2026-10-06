@@ -2,7 +2,7 @@
 
 > 🧘 **开屏自律门禁工具，100% 纯血离线运行，意图审视与习惯打卡。**
 
-[![Version](https://img.shields.io/badge/version-1.0.6-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
+[![Version](https://img.shields.io/badge/version-1.1.2-blue.svg)](https://github.com/xiaohongfa/Opening-Tip)
 [![Developer](https://img.shields.io/badge/Developer-%E5%B0%8F%E7%BA%A2Fa-brightgreen.svg)](https://github.com/xiaohongfa)
 [![Organization](https://img.shields.io/badge/Organization-Hyperintell-orange.svg)](https://github.com/xiaohongfa)
 [![Offline](https://img.shields.io/badge/Network-0%20Permissions%20(Offline)-success.svg)](https://github.com/xiaohongfa/Opening-Tip)
@@ -25,7 +25,7 @@
 - 🚨 **超时多重强提醒**：倒计时归零时触发 **双脉冲震动感知** + **高优先级横幅提醒**，胶囊即刻转为橙红警示与超时计数（`⚠️ 超时 00:15`）；
 - 🎯 **意图达成主动研判展示**：在下次开屏时，基于真实进入桌面的有效使用时长精准对比并醒目展示 `🟢 按时达成 (提前X分)` 或 `🟠 超时使用`；智能过滤误触短会话，历史记录永久稳固；
 - 🏷️ **自定义快捷意图标签**：内置高频动作标签，并支持用户自由增删改与持久化自定义（如回工作、背单词、查资料等）；
-- 📊 **今日自律看板**：开屏顶部直观呈现当前高清时钟、**今日第 N 次点亮屏幕次数**以及**今日累计使用时长**；
+- 📊 **系统使用看板**：直接读取 Android 系统的亮屏次数与累计亮屏时长，显示系统日统计起点，不再根据本应用会话计数或累计；
 - 🌿 **日常健康微习惯提示**：门禁底部呈现深呼吸、喝温水润喉、眺望远方、舒展肩颈等温馨身心关怀提示；
 - 🥋 **无障碍金钟罩与0ms防逃逸 (杀不掉)**：集成 Android 系统内核最高保活级别的无障碍服务（`BIND_ACCESSIBILITY_SERVICE`），具备 `PERSISTENT_PROC` 优先级，豁免系统多任务一键清理；未输入意图前，0ms瞬间截获桌面滑动手势与按键，强制重回门禁；
 - 🩺 **权限体检与系统防杀中心**：全自动化体检无障碍金钟罩、使用情况统计、悬浮窗、后台弹出界面、电池无限制与开机自启动，提供顶部醒目警示与逐项直达修复通道；
@@ -40,7 +40,7 @@
 
 * **开发者**：小红Fa
 * **所属组织**：Hyperintell
-* **版本号**：v1.0.6 (正式版)
+* **版本号**：v1.1.2 (正式版)
 * **开源协议**：Apache-2.0
 
 ---
@@ -56,6 +56,16 @@ cd tip-android
 `
 编译产物位于：
 	ip-android/app/build/outputs/apk/consumer/release/app-consumer-release.apk
+
+---
+
+## 📊 系统使用统计
+
+v1.1.2 已移除每日被动时间功能，保留专注倒计时与意图悬浮胶囊。
+
+手机使用看板直接查询 `UsageStatsManager.queryEventStats(INTERVAL_DAILY, ...)`，读取最新系统日统计中 `SCREEN_INTERACTIVE` 的 `count` 与 `totalTime`。不累加应用前台时长、不使用本应用会话记录，也不自行补算正在亮屏的时长。
+
+系统日统计区间由手机系统划分，可能不是本地零点起算；界面显示系统返回的统计起点。使用时长采用累计亮屏口径，数据随系统统计更新。未授权使用情况访问或系统未提供数据时，显示提示与“—”，不冒充为零。历史意图记录继续独立保留。
 
 ---
 

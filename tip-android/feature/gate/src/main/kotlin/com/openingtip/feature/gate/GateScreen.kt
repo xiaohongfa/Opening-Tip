@@ -1,5 +1,7 @@
 package com.openingtip.feature.gate
 
+import com.openingtip.data.usage.SystemScreenUsageState
+import com.openingtip.data.usage.ScreenUsageStatus
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -88,9 +90,7 @@ fun GateScreen(
     whitelistApps: List<WhitelistAppItem>,
     todos: List<TodoItem> = emptyList(),
     historySessions: List<SessionHistoryItem> = emptyList(),
-    todayUnlockCount: Int = 0,
-    todayUsageDurationMs: Long = 0L,
-    todayPassiveDurationMs: Long = 0L,
+    screenUsage: SystemScreenUsageState = SystemScreenUsageState(),
     onImportLocalAudio: (() -> Unit)? = null,
     onFilePickerActiveChanged: ((Boolean) -> Unit)? = null,
     onToggleTodo: (String, Boolean) -> Unit = { _, _ -> },
@@ -182,9 +182,7 @@ fun GateScreen(
         ) {
             // 1. 顶部：时间与日期 + 今日自律数据看板 + 历史足迹入口 + 倒计日功能胶囊
             HeaderSection(
-                todayUnlockCount = todayUnlockCount,
-                todayUsageDurationMs = todayUsageDurationMs,
-                todayPassiveDurationMs = todayPassiveDurationMs,
+                screenUsage = screenUsage,
                 pinnedCountdown = pinnedCountdown,
                 onOpenHistory = { showHistoryDialog = true },
                 onOpenCountdown = { showCountdownDialog = true }
@@ -278,9 +276,7 @@ fun GateScreen(
 
 @Composable
 private fun HeaderSection(
-    todayUnlockCount: Int,
-    todayUsageDurationMs: Long,
-    todayPassiveDurationMs: Long,
+    screenUsage: SystemScreenUsageState,
     pinnedCountdown: CountdownItem,
     onOpenHistory: () -> Unit,
     onOpenCountdown: () -> Unit
@@ -351,8 +347,8 @@ private fun HeaderSection(
                     Text("📱", fontSize = 15.sp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
-                        Text("今日点亮", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("$todayUnlockCount 次", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("系统亮屏", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(screenUsage.stats?.let { "${it.screenOnCount} 次" } ?: "—", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -369,8 +365,8 @@ private fun HeaderSection(
                     Text("⏱️", fontSize = 15.sp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
-                        Text("今日已用", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(formatDurationShort(todayUsageDurationMs), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("系统使用", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(screenUsage.stats?.let { formatDurationShort(it.durationMs) } ?: "—", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -410,61 +406,19 @@ private fun HeaderSection(
             }
         }
 
-        // 践行自律：每日被动屏幕时间进度条卡片（建议 ≤ 1.5小时）
-        val isExceeded = todayPassiveDurationMs > PassiveTimeManager.TARGET_DAILY_PASSIVE_MS
-        val remainingMs = PassiveTimeManager.TARGET_DAILY_PASSIVE_MS - todayPassiveDurationMs
-        val passiveProgress = (todayPassiveDurationMs.toFloat() / PassiveTimeManager.TARGET_DAILY_PASSIVE_MS.toFloat()).coerceIn(0f, 1f)
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = if (isExceeded) {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-            }
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (isExceeded) "⚠️ 📺" else "📺", fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "今日被动屏幕时间 (建议≤1.5h)",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Text(
-                        text = if (isExceeded) {
-                            "已用 ${PassiveTimeManager.formatDurationReadable(todayPassiveDurationMs)} (超标!)"
-                        } else {
-                            "${PassiveTimeManager.formatDurationReadable(todayPassiveDurationMs)} / 1.5h (剩${PassiveTimeManager.formatDurationReadable(remainingMs)})"
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                LinearProgressIndicator(
-                    progress = { passiveProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = if (isExceeded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                )
+        val stats = screenUsage.stats
+        val usageCaption = if (stats != null) {
+            val start = SimpleDateFormat("M月d日 HH:mm", Locale.getDefault()).format(Date(stats.intervalStartMs))
+            "系统日统计 · $start 起 · 累计亮屏时长"
+        } else {
+            when (screenUsage.status) {
+                ScreenUsageStatus.LOADING -> "正在读取系统使用统计…"
+                ScreenUsageStatus.PERMISSION_REQUIRED -> "请在权限体检中开启使用情况访问权限"
+                ScreenUsageStatus.UNAVAILABLE -> "系统暂未提供使用统计"
+                ScreenUsageStatus.AVAILABLE -> "系统暂未提供使用统计"
             }
         }
+        Text(usageCaption, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

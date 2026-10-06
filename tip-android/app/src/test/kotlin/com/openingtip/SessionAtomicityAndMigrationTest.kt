@@ -298,8 +298,6 @@ class FakeSessionDao : SessionDao {
     override fun observeAllSessions(): Flow<List<SessionEntity>> = emptyFlow()
     override fun observeSessionById(sessionId: String): Flow<SessionEntity?> = emptyFlow()
     override fun observeSegmentsForSession(sessionId: String): Flow<List<SessionSegmentEntity>> = emptyFlow()
-    override fun observeTodaySessionCount(startOfDayMs: Long): Flow<Int> = emptyFlow()
-    override fun observeTodayTotalDuration(startOfDayMs: Long): Flow<Long> = emptyFlow()
     override suspend fun deleteClosedSessionsBefore(thresholdWallMs: Long) {}
     override suspend fun getPreviousClosedSession(currentSessionId: String?): SessionEntity? = null
     override suspend fun getPreviousMeaningfulClosedSession(currentSessionId: String?): SessionEntity? = null

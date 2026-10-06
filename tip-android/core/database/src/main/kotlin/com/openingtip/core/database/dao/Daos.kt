@@ -110,12 +110,6 @@ interface SessionDao {
     @Query("SELECT * FROM session_segment WHERE sessionId = :sessionId AND endWallMs IS NULL LIMIT 1")
     suspend fun getOpenSegmentForSession(sessionId: String): SessionSegmentEntity?
 
-    @Query("SELECT COUNT(*) FROM session WHERE startWallMs >= :startOfDayMs")
-    fun observeTodaySessionCount(startOfDayMs: Long): Flow<Int>
-
-    @Query("SELECT COALESCE(SUM(durationMs), 0) FROM session WHERE startWallMs >= :startOfDayMs")
-    fun observeTodayTotalDuration(startOfDayMs: Long): Flow<Long>
-
     @Query("DELETE FROM session WHERE endWallMs < :thresholdWallMs AND status = 'CLOSED'")
     suspend fun deleteClosedSessionsBefore(thresholdWallMs: Long)
 
